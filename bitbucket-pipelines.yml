@@ -1,0 +1,25 @@
+image: node:22
+
+pipelines:
+  branches:
+    main:
+      - step:
+          name: Build & Publish
+          caches:
+            - node
+          script:
+            - npm ci
+            - npm run build
+            - npm publish --force --registry=https://registry.awesomeshinythings.co.uk
+            - VERSION=$(node -p "require('./package.json').version")
+            - REPO_NAME=$(node -p "require('./package.json').name")
+            - |
+              IMAGE_URL="https://registry.awesomeshinythings.co.uk/-/web/detail/@casta/events-lib"
+              curl -X POST -H 'Content-type: application/json' --data "{
+                \"username\": \"Deploy Bot\",
+                \"icon_emoji\": \":rocket:\",
+                \"blocks\": [
+                  { \"type\": \"header\", \"text\": { \"type\": \"plain_text\", \"text\": \"New Version\" } },
+                  { \"type\": \"section\", \"accessory\": { \"type\": \"button\", \"text\": { \"type\": \"plain_text\", \"text\": \"View in NPM Registry\", \"emoji\": true }, \"value\": \"button\", \"url\": \"${IMAGE_URL}\", \"action_id\": \"button-action\" }, \"fields\": [ { \"type\": \"mrkdwn\", \"text\": \"*Repo:*\\n$REPO_NAME\" }, { \"type\": \"mrkdwn\", \"text\": \"*Tag:*\\n$VERSION\" } ] }
+                ]
+              }" $SLACK_WEBHOOK_URL

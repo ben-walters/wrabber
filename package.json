@@ -1,0 +1,49 @@
+{
+  "name": "wrabber",
+  "version": "0.0.1",
+  "description": "A simple typesafe wrapper for RabbitMQ that simplies the config and management of RabbitMQ.",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "build": "tsc",
+    "build:watch": "tsc -w ",
+    "start": "node ./build/index.js",
+    "dev": "nodemon ./src/index.ts",
+    "lint": "eslint .",
+    "lint:fix": "eslint --fix ."
+  },
+  "bin": {
+    "wrabber": "dist/cli.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+ssh://git@github.com/awesomeshinythings/wrabber.git"
+  },
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/awesomeshinythings/wrabber/issues"
+  },
+  "homepage": "https://github.com/awesomeshinythings/wrabber#readme",
+  "dependencies": {
+    "amqplib": "^0.10.5",
+    "js-yaml": "^4.1.0",
+    "pino": "^9.6.0"
+  },
+  "devDependencies": {
+    "@side/jest-runtime": "^1.1.0",
+    "@swc/jest": "^0.2.37",
+    "@types/amqplib": "^0.10.7",
+    "@types/jest": "^29.5.14",
+    "@types/js-yaml": "^4.0.9",
+    "@typescript-eslint/eslint-plugin": "^8.24.1",
+    "eslint": "^9.20.1",
+    "eslint-import-resolver-typescript": "^3.8.2",
+    "eslint-plugin-import": "^2.31.0",
+    "eslint-plugin-simple-import-sort": "^12.1.1",
+    "eslint-plugin-unused-imports": "^4.1.4",
+    "ts-jest": "^29.2.5",
+    "typescript": "^5.7.3"
+  }
+}
