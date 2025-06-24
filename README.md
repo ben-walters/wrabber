@@ -1,156 +1,336 @@
-# EventsEngine
+# Wrabber
 
-## Overview
+[![NPM Version](https://img.shields.io/npm/v/wrabber.svg)](https://www.npmjs.com/package/wrabber)
+[![CI](https://github.com/ben-walters/wrabber/actions/workflows/release.yaml/badge.svg)](https://github.com/ben-walters/wrabber/actions)
+[![codecov](https://codecov.io/gh/ben-walters/wrabber/graph/badge.svg)](https://codecov.io/gh/ben-walters/wrabber)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-`EventsEngine` is a lightweight event-driven messaging system built on top of RabbitMQ. It enables easy message publishing and subscription through a single queue, making it ideal for microservices communication and event-driven architectures.
+**Wrabber** is a type-safe RabbitMQ wrapper that allows you to define your event types in a YAML file and generate TypeScript types automatically. It ensures type safety and improves developer experience when working with RabbitMQ.
+
+---
 
 ## Features
 
-- Connects to RabbitMQ
-- Supports event emission and listening
-- Allows dynamic registration of event handlers
-- Provides built-in debugging for easier monitoring
-- Ensures durable message delivery
+- **Type-Safe Events**: Define your event types in a YAML file and generate TypeScript types for strict type checking.
+- **Namespace Support**: Organize your events into namespaces for better structure.
+- **Customizable**: Supports enums, nested objects, and arrays in event payloads.
+- **Easy Integration**: Designed to work seamlessly with RabbitMQ.
+
+---
 
 ## Installation
 
-Ensure that you have Node.js installed, then install dependencies:
+Install Wrabber via NPM:
 
-```sh
-npm install amqplib
+```bash
+npm install wrabber
 ```
 
-## Usage
+---
 
-### Installing
+## Getting Started
 
-Ensure you are authenticated against the `registry.awesomeshinythings.co.uk` private npm repo. Then, simply include an `.npmrc` file in your project root with the following content, being sure to set the local env var for `$CASTA_NPM_TOKEN`
+### 1. Create an Event Definition File
 
+Create a YAML file (e.g., `.wrabber/events.yaml`) in your project directory. This file defines your event types and their payloads.
+
+#### Example `.wrabber/events.yaml`
+
+```yaml
+version: 1
+namespace: true
+events:
+  Auth:
+    UserCreated:
+      userId:
+        type: string
+        required: true
+      firstName:
+        type: string
+        required: true
+      lastName:
+        type: string
+        required: true
+      email:
+        type: string
+        required: true
+      passwordToken:
+        type: string
+        required: true
+      imageUrl:
+        type: string
+        required: false
+    UserAuthenticated:
+      userId:
+        type: string
+        required: true
+      mechanism:
+        type: enum
+        required: true
+        values: ['password', 'passwordless']
+      userAgent:
+        type: string
+        required: true
+  CoreApi:
+    ProjectCreated:
+      projectId:
+        type: string
+        required: true
+      projectName:
+        type: string
+        required: true
+      userId:
+        type: string
+        required: true
 ```
-@casta:registry=https://registry.awesomeshinythings.co.uk
-//registry.awesomeshinythings.co.uk/:_authToken=${CASTA_NPM_TOKEN}
+
+---
+
+### 2. Generate TypeScript Types
+
+Run the following command to generate the TypeScript types based on your YAML file:
+
+```bash
+npx wrabber generate
 ```
 
-From there, simply run `npm i -s @casta/events-lib`
+This will generate your types for you.
 
-### Initializing the Events Engine
+---
 
-```ts
-import { EventsEngine } from './EventsEngine';
+### 3. Use the Generated Types
 
-const events = new EventsEngine({
+You can now use the generated types in your project to ensure type safety when emitting or handling events.
+
+#### Important: Event Names Must Be String Literals
+
+When calling `.emit()` or `.on()`, the event name will be a **string literal** (e.g., `"Auth.UserCreated"`, `"CoreApi.ProjectCreated"`). This ensures compatibility with the generated types.
+
+---
+
+#### Example Usage
+
+```typescript
+import { Wrabber } from 'wrabber';
+
+const wrabber = new Wrabber({
   url: 'amqp://localhost',
-  queue: 'my-events',
-  canListen: true, // Enable listening mode
-  debug: true, // Enable debug logs
+  serviceName: 'my-service',
+  namespace: 'my-namespace',
+  debug: true,
+  canListen: true,
 });
 
-await events.init();
-```
-
-### Emitting Events
-
-To emit an event, use the `emit` method with the event type and payload:
-
-```ts
-import { EventTypes } from './types';
-
-events.emit(EventTypes.Auth.UserCreated, {
+// Emit an event
+wrabber.emit('Auth.UserCreated', {
+  // type-safe input!
   userId: '123',
   firstName: 'John',
   lastName: 'Doe',
   email: 'john.doe@example.com',
-  passwordToken: 'abcd1234',
-  imageUrl: 'https://example.com/avatar.png',
+  passwordToken: 'abc123',
+  imageUrl: 'https://example.com/image.jpg',
 });
-```
 
-### Listening to Events
-
-To register an event listener, use the `on` method:
-
-```ts
-events.on(EventTypes.Auth.UserCreated, (data) => {
+// Listen for an event
+wrabber.on('Auth.UserCreated', (data) => {
+  // type-safe data!
   console.log('User created:', data);
 });
 ```
 
-### Closing the Connection
+---
 
-Ensure the connection is properly closed when shutting down your application:
+## CONFIG
 
-```ts
-await events.close();
+The `Wrabber` class accepts a configuration object (`EventsOpts`) when instantiated. Below are the available configuration options:
+
+### Configuration Options
+
+| Option        | Type      | Default Value | Description                                                                    |
+| ------------- | --------- | ------------- | ------------------------------------------------------------------------------ |
+| `url`         | `string`  | **Required**  | The RabbitMQ connection URL (e.g., `amqp://localhost`).                        |
+| `serviceName` | `string`  | **Required**  | The name of your service. Used to construct the queue name.                    |
+| `namespace`   | `string`  | **Required**  | The namespace for your events. Used to construct the exchange name.            |
+| `debug`       | `boolean` | `false`       | Enables debug logging for emitted and received events.                         |
+| `canListen`   | `boolean` | `false`       | If `true`, the engine will listen for incoming events.                         |
+| `fanout`      | `boolean` | `false`       | If `true`, the queue will be exclusive and auto-deleted (fanout mode).         |
+| `devMode`     | `boolean` | `false`       | If `true`, the engine runs in development mode without connecting to RabbitMQ. |
+
+---
+
+### Detailed Explanation of Options
+
+#### `url`
+
+The RabbitMQ connection URL. This is required to establish a connection to RabbitMQ.
+
+#### `serviceName`
+
+The name of your service. This is used to construct the queue name. For example, if `serviceName` is `"my-service"` and `namespace` is `"my-namespace"`, the queue name will be `"my-namespace.my-service"`.
+
+#### `namespace`
+
+The namespace for your events. This is used to construct the exchange name in RabbitMQ.
+
+#### `debug`
+
+If `true`, debug logs will be printed for emitted and received events. This is useful for troubleshooting.
+
+#### `canListen`
+
+If `true`, the engine will listen for incoming events. This is required if your service needs to consume events from RabbitMQ.
+
+#### `fanout`
+
+If `true`, the queue will be exclusive and auto-deleted. This is useful for fanout exchanges where multiple consumers receive the same message.
+
+#### `devMode`
+
+If `true`, the engine runs in development mode without connecting to RabbitMQ. This is useful for testing and debugging locally.
+
+---
+
+## YAML Schema Format
+
+The YAML file defines your event types and their payloads. Below is a breakdown of the schema format:
+
+### Top-Level Fields
+
+- **`version`**: The schema version (e.g., `1`).
+- **`namespace`**: Whether to namespace events (e.g., `EventTypes.Auth.UserCreated`).
+- **`events`**: A map of namespaces and their events.
+
+### Event Definition
+
+Each event is defined with its payload fields. Fields can be of the following types:
+
+- **`string`**
+- **`number`**
+- **`boolean`**
+- **`enum`**: A list of allowed values.
+- **`object`**: A nested object with its own fields.
+- **`array`**: An array of a specific type.
+
+#### Example Event Definition
+
+```yaml
+Auth:
+  UserCreated:
+    userId:
+      type: string
+      required: true
+    firstName:
+      type: string
+      required: true
+    lastName:
+      type: string
+      required: true
+    email:
+      type: string
+      required: true
+    passwordToken:
+      type: string
+      required: true
+    imageUrl:
+      type: string
+      required: false
 ```
 
-## Defining New Message Types
+---
 
-### Step 1: Add a New Event Type
+## CLI Commands
 
-Define the new event type in `EventTypes`:
+Wrabber provides the following CLI commands:
 
-```ts
-export enum MyNewEvents {
-  OrderPlaced = 'order-placed',
-  OrderShipped = 'order-shipped',
-}
-```
+### `npx wrabber generate`
 
-### Step 2: Extend `EventDataMap`
+Generates the TypeScript types based on the YAML file.
 
-Add the corresponding data structure for the new event in `EventDataMap`:
+#### Options:
 
-```ts
-export interface EventDataMap {
-  [MyNewEvents.OrderPlaced]: {
-    orderId: string;
-    userId: string;
-    amount: number;
-  };
-  [MyNewEvents.OrderShipped]: {
-    orderId: string;
-    shippingDate: string;
-  };
-}
-```
+- `--file=<path>`: Specify the path to the YAML file (default: `.wrabber/events.yaml`).
 
-### Step 3: Use the New Event Type
+---
 
-Now, you can emit and listen for the new event:
+## Example Workflow
 
-```ts
-events.emit(MyNewEvents.OrderPlaced, {
-  orderId: 'abc123',
-  userId: 'user456',
-  amount: 99.99,
-});
-```
+1. **Install Wrabber**:
 
-```ts
-events.on(MyNewEvents.OrderPlaced, (data) => {
-  console.log('Order placed:', data);
-});
-```
+   ```bash
+   npm install wrabber
+   ```
 
-## Debugging
+2. **Create a YAML File**:
+   Save the following as `.wrabber/events.yaml`:
 
-To enable debugging, pass `debug: true` when initializing `EventsEngine`. This logs event emissions and received messages to the console:
+   ```yaml
+   version: 1
+   namespace: true
+   events:
+     Auth:
+       UserCreated:
+         userId:
+           type: string
+           required: true
+         firstName:
+           type: string
+           required: true
+         lastName:
+           type: string
+           required: true
+         email:
+           type: string
+           required: true
+         passwordToken:
+           type: string
+           required: true
+         imageUrl:
+           type: string
+           required: false
+   ```
 
-```ts
-const events = new EventsEngine({
-  url: 'amqp://localhost',
-  queue: 'debug-events',
-  canListen: true,
-  debug: true,
-});
-```
+3. **Generate Types**:
 
-## Error Handling
+   ```bash
+   npx wrabber generate
+   ```
 
-- If RabbitMQ is unreachable, an error will be thrown during initialization.
-- If an event is emitted before the engine is initialized, a warning is displayed.
-- Errors within event handlers are caught and logged.
+4. **Use the Types**:
+
+   ```typescript
+   const wrabber = new Wrabber({
+     // config
+   });
+
+   wrabber.emit('Auth.UserCreated', {
+     userId: '123',
+     firstName: 'John',
+     lastName: 'Doe',
+     email: 'john.doe@example.com',
+     passwordToken: 'abc123',
+     imageUrl: 'https://example.com/image.jpg',
+   });
+   ```
+
+---
+
+## Contributing
+
+Contributions are welcome! If you find a bug or have a feature request, please open an issue or submit a pull request.
+
+---
 
 ## License
 
-This project is licensed under the MIT License.
+Wrabber is licensed under the [MIT License](LICENSE).
+
+---
+
+## Support
+
+If you have any questions or need help, feel free to open an issue on the [GitHub repository](https://github.com/ben-walters/wrabber).
+
+---
+
+Let me know if you need further adjustments or additional sections for the README! 🚀
