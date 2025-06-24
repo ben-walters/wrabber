@@ -17,7 +17,7 @@ interface EventsOpts {
 export type EventData<T extends keyof EventDataMap> = EventDataMap[T];
 type EventHandler<T extends keyof EventDataMap> = (data: EventData<T>) => void;
 
-export class EventsEngine {
+export class Wrabber {
   private connection!: amqp.ChannelModel;
   private channel!: amqp.Channel;
   private debug: boolean;
