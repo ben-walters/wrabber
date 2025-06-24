@@ -43,6 +43,9 @@ jobs:
         if: steps.tag_version.outputs.new_tag
         run: npm run build
 
+      - name: Make cli executable
+        run: chmod +x ./dist/cli.js
+
       - name: Publish to NPM
         if: steps.tag_version.outputs.new_tag
         uses: JS-DevTools/npm-publish@v3

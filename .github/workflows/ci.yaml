@@ -40,3 +40,6 @@ jobs:
 
       - name: Build package
         run: npm run build
+
+      - name: Make cli executable
+        run: chmod +x ./dist/cli.js
