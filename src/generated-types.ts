@@ -1,12 +1,7 @@
-// Default placeholder for generated types
-// This file will be overwritten when the user runs `wrabber generate`
+export namespace EventTypes {}
 
-export namespace EventTypes {
-  // Placeholder namespace
-}
+export interface EventDataMap {}
 
-export interface EventDataMap {
-  // Placeholder interface
-}
+export const Events = {} as const;
 
-export type Events = keyof EventDataMap;
+export type EventName = keyof EventDataMap;

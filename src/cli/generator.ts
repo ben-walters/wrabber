@@ -2,6 +2,7 @@ import fs from 'fs';
 import yaml from 'js-yaml';
 import path from 'path';
 
+// ... (interfaces and validateVersion function remain the same) ...
 interface EventField {
   type: string;
   required: boolean;
@@ -16,18 +17,6 @@ interface EventsSchema {
   events: Record<string, Record<string, Record<string, EventField>>>;
 }
 
-const args = process.argv.slice(2);
-let filePath = path.resolve(process.cwd(), '.wrabber/events.yaml');
-
-for (const arg of args) {
-  if (arg.startsWith('--file=')) {
-    filePath = path.resolve(process.cwd(), arg.split('=')[1]);
-  }
-}
-
-const OUTPUT_FILE_TS = path.resolve(__dirname, '../generated-types.ts');
-const OUTPUT_FILE_D_TS = path.resolve(__dirname, '../generated-types.d.ts');
-
 export function validateVersion(version: string): void {
   const SUPPORTED_VERSIONS = [1];
   if (!SUPPORTED_VERSIONS.includes(parseInt(version, 10))) {
@@ -39,7 +28,26 @@ export function validateVersion(version: string): void {
   }
 }
 
+// --- ARGUMENT AND PATH PARSING ---
+const args = process.argv.slice(2);
+let filePath = path.resolve(process.cwd(), '.wrabber/events.yaml');
+
+for (const arg of args) {
+  if (arg.startsWith('--file=')) {
+    // The input file path is still resolved relative to the user's current directory
+    filePath = path.resolve(process.cwd(), arg.split('=')[1]);
+  }
+}
+
+// --- CORRECTED OUTPUT PATHS ---
+// Define output paths relative to this script's location inside the `dist` folder.
+// Assuming this script is in `dist/cli/`, `../` will correctly place the files in `dist/`.
+const OUTPUT_FILE_TS = path.resolve(__dirname, '../generated-types.ts');
+const OUTPUT_FILE_D_TS = path.resolve(__dirname, '../generated-types.d.ts');
+
+// The generateTypes function is correct and remains unchanged.
 export function generateTypes(schema: EventsSchema): string {
+  // ... (your existing, correct generateTypes function) ...
   const { namespace, events } = schema;
   const lines: string[] = [];
 
@@ -62,7 +70,6 @@ export function generateTypes(schema: EventsSchema): string {
       return field.values.map((v) => `"${v}"`).join(' | ');
     } else if (field.type === 'array' && field.items) {
       const itemType = resolveFieldType(field.items);
-      // Wrap enums (union types) in parentheses for correct array typing
       if (field.items.type === 'enum') {
         return `(${itemType})[]`;
       }
@@ -126,7 +133,7 @@ export function generateTypes(schema: EventsSchema): string {
   lines.push('}');
   lines.push('');
   lines.push('// --- RUNTIME VALUE for event names ---');
-  lines.push('export const Events = {'); // Changed from EventNames
+  lines.push('export const Events = {');
 
   for (const [namespaceName, eventGroup] of Object.entries(events)) {
     lines.push(`  ${namespaceName}: {`);
@@ -147,28 +154,37 @@ export function generateTypes(schema: EventsSchema): string {
 
 async function main() {
   try {
+    if (!fs.existsSync(filePath)) {
+      throw new Error(
+        `Schema file not found at the specified path: ${filePath}`
+      );
+    }
+
     const fileContent = fs.readFileSync(filePath, 'utf8');
+
     const schema = yaml.load(fileContent) as EventsSchema;
+
+    if (!schema || !schema.events || Object.keys(schema.events).length === 0) {
+      throw new Error(
+        'The YAML file was parsed, but it appears to be empty or missing the top-level "events" key.'
+      );
+    }
 
     validateVersion(schema.version);
 
-    // Generate the full implementation content with types and values.
     const implementationContent = generateTypes(schema);
 
-    // Write the full implementation to the .ts file.
     fs.writeFileSync(OUTPUT_FILE_TS, implementationContent, 'utf8');
 
-    // Create the simple declaration content that re-exports from the .ts file.
-    // This correctly separates implementation from declaration.
+    // The path in the re-export must be relative to the file's location.
     const declarationContent = `export * from './generated-types';\n`;
 
-    // Write the declaration to the .d.ts file.
     fs.writeFileSync(OUTPUT_FILE_D_TS, declarationContent, 'utf8');
 
     console.log(`[WRABBER] - Generated types succesfully.`);
   } catch (error) {
-    console.error(`[WRABBER] - Error: ${error.message}`);
-    return;
+    console.error(`\n[WRABBER] - FATAL ERROR: ${error.message}\n`);
+    process.exit(1);
   }
 }
 

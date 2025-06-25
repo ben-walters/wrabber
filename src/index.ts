@@ -184,4 +184,4 @@ export class Wrabber {
   }
 }
 
-export { Events } from './generated-types';
+export { EventName, EventTypes } from './generated-types';
