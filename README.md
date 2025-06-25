@@ -28,6 +28,12 @@ Install Wrabber via NPM:
 npm install wrabber
 ```
 
+Then, to get started run:
+
+```
+npx wrabber init
+```
+
 ---
 
 ## Getting Started

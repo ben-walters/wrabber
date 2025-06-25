@@ -1,13 +1,16 @@
 #!/usr/bin/env node
 
 import { execSync } from 'child_process';
-import { writeFileSync } from 'fs';
+import { existsSync, writeFileSync } from 'fs';
 import path from 'path';
+
+import { baseFile } from './helpers/base';
 
 const args = process.argv.slice(2);
 const command = args[0];
 
 const generatorPath = path.resolve(__dirname, './cli/generator.js');
+
 let filePath = path.resolve(process.cwd(), '.wrabber/events.yaml');
 const main = async () => {
   switch (command) {
@@ -43,17 +46,29 @@ const main = async () => {
         return;
       }
       break;
-    case 'postinstall':
+    case 'init':
       try {
-        console.log(
-          `[WRABBER] - Create a file at the default location (${filePath}). `
-        );
-        console.log(
-          `See the docs at: https://www.npmjs.com/package/wrabber, or run "npx wrabber help"`
-        );
-        return;
+        const exists = existsSync(filePath);
+        if (!exists) {
+          console.log(
+            `[WRABBER] - Unable to find schema file at the default location. Creating: ${filePath}`
+          );
+          console.log(
+            `See the docs at: https://www.npmjs.com/package/wrabber, or run "npx wrabber help"`
+          );
+          writeFileSync(filePath, baseFile, 'utf-8');
+          console.log('Done!');
+          return;
+        } else {
+          console.log(
+            `[WRABBER] - Schema file already exists at: ${filePath}. No changes made.`
+          );
+        }
+        execSync(`node ${generatorPath} --file=${filePath}`, {
+          stdio: 'inherit',
+        });
       } catch (error) {
-        console.error('[WRABBER] - Error during postinstall:', error.message);
+        console.error('[WRABBER] - Error during init:', error.message);
       }
       break;
     case 'help':
@@ -71,8 +86,10 @@ const main = async () => {
         '  --file     Specify the path to the YAML schema file (default: .wrabber/events.yaml)'
       );
       console.log('  --url      Specify the url to the YAML schema file');
+      console.log(
+        'More info can be found here: https://www.npmjs.com/package/wrabber'
+      );
   }
-  return;
 };
 
 main();

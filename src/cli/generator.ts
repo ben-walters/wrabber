@@ -60,7 +60,13 @@ export function generateTypes(schema: EventsSchema): string {
     } else if (field.type === 'enum' && field.values) {
       return field.values.map((v) => `"${v}"`).join(' | ');
     } else if (field.type === 'array' && field.items) {
-      return `${resolveFieldType(field.items)}[]`;
+      const itemType = resolveFieldType(field.items);
+
+      if (field.items.type === 'enum') {
+        return `(${itemType})[]`;
+      }
+
+      return `${itemType}[]`;
     } else {
       return field.type;
     }
