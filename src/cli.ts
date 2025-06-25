@@ -1,14 +1,13 @@
 #!/usr/bin/env node
 
 import { execSync } from 'child_process';
-import { existsSync, writeFileSync } from 'fs';
+import { writeFileSync } from 'fs';
 import path from 'path';
 
 const args = process.argv.slice(2);
 const command = args[0];
 
 const generatorPath = path.resolve(__dirname, './cli/generator.js');
-
 let filePath = path.resolve(process.cwd(), '.wrabber/events.yaml');
 const main = async () => {
   switch (command) {
@@ -73,6 +72,7 @@ const main = async () => {
       );
       console.log('  --url      Specify the url to the YAML schema file');
   }
+  return;
 };
 
 main();
