@@ -26,7 +26,7 @@ jobs:
           cache: 'npm'
 
       - name: Install dependencies
-        run: npm ci
+        run: npm ci  --ignore-scripts
 
       - name: Get version from package.json
         id: get_version
@@ -41,7 +41,7 @@ jobs:
 
       - name: Build package
         if: steps.tag_version.outputs.new_tag
-        run: npm run build
+        run: npm run build  --ignore-scripts
 
       - name: Make cli executable
         run: chmod +x ./dist/cli.js
