@@ -11,7 +11,8 @@
     "start": "node ./build/index.js",
     "dev": "nodemon ./src/index.ts",
     "lint": "eslint .",
-    "lint:fix": "eslint --fix ."
+    "lint:fix": "eslint --fix .",
+    "postinstall": "npx wrabber postinstall"
   },
   "bin": {
     "wrabber": "dist/cli.js"

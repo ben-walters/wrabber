@@ -3,11 +3,11 @@ import yaml from 'js-yaml';
 import path from 'path';
 
 interface EventField {
-  type: string; // The type of the field (e.g., string, number, enum, object, array)
-  required: boolean; // Whether the field is required
-  fields?: Record<string, EventField>; // For nested objects
-  items?: EventField; // For arrays
-  values?: string[]; // For enums (list of allowed values)
+  type: string;
+  required: boolean;
+  fields?: Record<string, EventField>;
+  items?: EventField;
+  values?: string[];
 }
 
 interface EventsSchema {
@@ -16,9 +16,8 @@ interface EventsSchema {
   events: Record<string, Record<string, Record<string, EventField>>>;
 }
 
-// Parse command-line arguments
 const args = process.argv.slice(2);
-let filePath = path.resolve(process.cwd(), '.wrabber/events.yaml'); // Default file path
+let filePath = path.resolve(process.cwd(), '.wrabber/events.yaml');
 
 for (const arg of args) {
   if (arg.startsWith('--file=')) {
@@ -26,7 +25,6 @@ for (const arg of args) {
   }
 }
 
-// Output file path for the generated types in the installed module
 const OUTPUT_FILE_TS = path.resolve(__dirname, '../generated-types.ts');
 const OUTPUT_FILE_D_TS = path.resolve(__dirname, '../generated-types.d.ts');
 
@@ -51,7 +49,6 @@ function generateTypes(schema: EventsSchema): string {
 
   function resolveFieldType(field: EventField): string {
     if (field.type === 'object' && field.fields) {
-      // Handle nested objects
       const nestedFields = Object.entries(field.fields)
         .map(([nestedFieldName, nestedField]) => {
           const nestedOptional = nestedField.required ? '' : '?';
@@ -62,13 +59,10 @@ function generateTypes(schema: EventsSchema): string {
         .join('\n');
       return `{\n${nestedFields}\n      }`;
     } else if (field.type === 'enum' && field.values) {
-      // Handle enums as a union of string literals
       return field.values.map((v) => `"${v}"`).join(' | ');
     } else if (field.type === 'array' && field.items) {
-      // Handle arrays
       return `${resolveFieldType(field.items)}[]`;
     } else {
-      // Handle primitive types (string, number, etc.)
       return field.type;
     }
   }
@@ -141,15 +135,13 @@ async function main() {
 
     const types = generateTypes(schema);
 
-    // Write the generated .ts file
     fs.writeFileSync(OUTPUT_FILE_TS, types, 'utf8');
 
-    // Copy the .ts file to the dist directory as .d.ts
     fs.writeFileSync(OUTPUT_FILE_D_TS, types, 'utf8');
 
-    console.log(`Generated types at ${OUTPUT_FILE_TS}`);
+    console.log(`[WRABBER] - Generated types succesfully.`);
   } catch (error) {
-    console.error(`Error: ${error.message}`);
+    console.error(`[WRABBER] - Error: ${error.message}`);
     process.exit(1);
   }
 }
