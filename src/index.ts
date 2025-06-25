@@ -135,7 +135,6 @@ export class Wrabber {
           logger.debug(data, `Event received: ${event}`);
         }
 
-        // Trigger registered handler if exists
         if (this.handlers.has(event)) {
           try {
             this.handlers.get(event)?.(data);
@@ -169,9 +168,6 @@ export class Wrabber {
     this.debug = debug;
   }
 
-  /**
-   * Register an event handler for a specific event type.
-   */
   on<T extends keyof EventDataMap>(events: T | T[], handler: EventHandler<T>) {
     const eventList = Array.isArray(events) ? events : [events]; // Normalize to an array
 
@@ -184,4 +180,4 @@ export class Wrabber {
   }
 }
 
-export { EventName, EventTypes } from './generated-types';
+export { EventDataMap, EventName, Events } from './generated-types';
