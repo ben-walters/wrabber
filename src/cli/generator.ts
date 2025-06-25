@@ -27,8 +27,7 @@ for (const arg of args) {
 
 const OUTPUT_FILE_TS = path.resolve(__dirname, '../generated-types.ts');
 const OUTPUT_FILE_D_TS = path.resolve(__dirname, '../generated-types.d.ts');
-
-function validateVersion(version: string): void {
+export function validateVersion(version: string): void {
   const SUPPORTED_VERSIONS = [1];
   if (!SUPPORTED_VERSIONS.includes(parseInt(version, 10))) {
     throw new Error(
@@ -39,7 +38,7 @@ function validateVersion(version: string): void {
   }
 }
 
-function generateTypes(schema: EventsSchema): string {
+export function generateTypes(schema: EventsSchema): string {
   const { namespace, events } = schema;
   const lines: string[] = [];
 

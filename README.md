@@ -1,5 +1,7 @@
 # Wrabber
 
+---
+
 [![NPM Version](https://img.shields.io/npm/v/wrabber.svg)](https://www.npmjs.com/package/wrabber)
 [![CI](https://github.com/ben-walters/wrabber/actions/workflows/release.yaml/badge.svg)](https://github.com/ben-walters/wrabber/actions)
 [![codecov](https://codecov.io/gh/ben-walters/wrabber/graph/badge.svg)](https://codecov.io/gh/ben-walters/wrabber)
