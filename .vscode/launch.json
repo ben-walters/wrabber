@@ -7,11 +7,21 @@
     {
       "type": "node",
       "request": "launch",
-      "name": "Launch CLI",
+      "name": "Launch CLI - generate",
       "skipFiles": ["<node_internals>/**"],
       "program": "${workspaceFolder}/dist/cli.js",
       "preLaunchTask": "tsc: build - tsconfig.json",
       "args": ["generate", "--url=https://cdn.kolla.pet/events.yaml"],
+      "outFiles": ["${workspaceFolder}/dist/**/*.js"]
+    },
+    {
+      "type": "node",
+      "request": "launch",
+      "name": "Launch CLI - postinstall",
+      "skipFiles": ["<node_internals>/**"],
+      "program": "${workspaceFolder}/dist/cli.js",
+      "preLaunchTask": "tsc: build - tsconfig.json",
+      "args": ["postinstall"],
       "outFiles": ["${workspaceFolder}/dist/**/*.js"]
     }
   ]
