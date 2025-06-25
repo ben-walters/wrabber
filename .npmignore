@@ -12,6 +12,7 @@ tsconfig.json
 .orettierrc
 eslint.config.js
 tsconfig.json
+.vscode
 
 # Github Actions
 .github/workflows/

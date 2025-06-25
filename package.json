@@ -45,5 +45,21 @@
     "eslint-plugin-unused-imports": "^4.1.4",
     "ts-jest": "^29.2.5",
     "typescript": "^5.7.3"
-  }
+  },
+  "keywords": [
+    "rabbitmq",
+    "amqp",
+    "event-driven",
+    "type-safe",
+    "typescript",
+    "wrabber",
+    "message-queue",
+    "pubsub",
+    "microservices",
+    "event-emitter",
+    "event-listener",
+    "messaging",
+    "event-bus",
+    "distributed-systems"
+  ]
 }

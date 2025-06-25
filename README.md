@@ -191,6 +191,34 @@ If `true`, the engine runs in development mode without connecting to RabbitMQ. T
 
 ---
 
+## Generating Types
+
+To generate a corresponding type file for your events, run:
+
+```
+npx wrabber generate
+```
+
+### Specifying files
+
+#### Local files
+
+You can specify a local file by passing `--file=/path/to/local/file.yaml` on the command line.
+
+```
+npx wrabber generate --file=/path/to/local/file.yaml
+```
+
+#### Remote files
+
+You can specify a remote file which will be downloaded by passing `--url=https://cdn.example.com/my-file.yaml` on the command line.
+
+```
+npx wrabber generate --file=/path/to/local/file.yaml
+```
+
+---
+
 ## YAML Schema Format
 
 The YAML file defines your event types and their payloads. Below is a breakdown of the schema format:
