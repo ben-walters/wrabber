@@ -56,6 +56,9 @@ const main = async () => {
           );
           process.exit(1); // Exit with error code
         }
+        execSync(`node ${generatorPath} --file=${filePath}`, {
+          stdio: 'inherit',
+        });
       } catch (error) {
         console.error('[WRABBER] - Error during postinstall:', error.message);
         process.exit(1); // Exit with error code
