@@ -43,13 +43,18 @@ for (const arg of args) {
 // Define output paths relative to this script's location inside the `dist` folder.
 // Assuming this script is in `dist/cli/`, `../` will correctly place the files in `dist/`.
 const OUTPUT_FILE_TS = path.resolve(__dirname, '../generated-types.ts');
+const OUTPUT_FILE_JS = path.resolve(__dirname, '../generated-types.js');
 const OUTPUT_FILE_D_TS = path.resolve(__dirname, '../generated-types.d.ts');
 
 // The generateTypes function is correct and remains unchanged.
-export function generateTypes(schema: EventsSchema): string {
+export function generateTypes(schema: EventsSchema): {
+  ts: string;
+  js: string;
+} {
   // ... (your existing, correct generateTypes function) ...
   const { namespace, events } = schema;
   const lines: string[] = [];
+  const jslines: string[] = [];
 
   lines.push('// AUTO-GENERATED FILE. DO NOT EDIT.');
   lines.push(`// Schema version: ${schema.version}`);
@@ -132,24 +137,31 @@ export function generateTypes(schema: EventsSchema): string {
   }
   lines.push('}');
   lines.push('');
+
   lines.push('// --- RUNTIME VALUE for event names ---');
+  jslines.push('// --- RUNTIME VALUE for event names ---');
   lines.push('export const Events = {');
+  jslines.push('export const Events = {');
 
   for (const [namespaceName, eventGroup] of Object.entries(events)) {
+    jslines.push(`  ${namespaceName}: {`);
     lines.push(`  ${namespaceName}: {`);
     for (const eventName of Object.keys(eventGroup)) {
       const flatEventName = `${namespaceName}.${eventName}`;
       lines.push(`    ${eventName}: "${flatEventName}",`);
+      jslines.push(`    ${eventName}: "${flatEventName}",`);
     }
     lines.push(`  },`);
+    jslines.push(`  },`);
   }
 
   lines.push('} as const;');
+  jslines.push('}');
   lines.push('');
   lines.push('// A union type of all event names');
   lines.push('export type EventName = keyof EventDataMap;');
 
-  return lines.join('\n');
+  return { ts: lines.join('\n'), js: jslines.join('\n') };
 }
 
 async function main() {
@@ -172,9 +184,10 @@ async function main() {
 
     validateVersion(schema.version);
 
-    const implementationContent = generateTypes(schema);
+    const { ts, js } = generateTypes(schema);
 
-    fs.writeFileSync(OUTPUT_FILE_TS, implementationContent, 'utf8');
+    fs.writeFileSync(OUTPUT_FILE_TS, ts, 'utf8');
+    fs.writeFileSync(OUTPUT_FILE_JS, js, 'utf8');
 
     // The path in the re-export must be relative to the file's location.
     const declarationContent = `export * from './generated-types';\n`;
