@@ -46,19 +46,13 @@ const main = async () => {
       break;
     case 'postinstall':
       try {
-        const exists = existsSync(filePath);
-        if (!exists) {
-          console.log(
-            `[WRABBER] - Unable to find schema file at the default location (${filePath}). `
-          );
-          console.log(
-            `See the docs at: https://www.npmjs.com/package/wrabber, or run "npx wrabber help"`
-          );
-          return;
-        }
-        execSync(`node ${generatorPath} --file=${filePath}`, {
-          stdio: 'inherit',
-        });
+        console.log(
+          `[WRABBER] - Create a file at the default location (${filePath}). `
+        );
+        console.log(
+          `See the docs at: https://www.npmjs.com/package/wrabber, or run "npx wrabber help"`
+        );
+        return;
       } catch (error) {
         console.error('[WRABBER] - Error during postinstall:', error.message);
       }
