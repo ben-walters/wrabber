@@ -141,7 +141,7 @@ async function main() {
     console.log(`[WRABBER] - Generated types succesfully.`);
   } catch (error) {
     console.error(`[WRABBER] - Error: ${error.message}`);
-    process.exit(1);
+    return;
   }
 }
 

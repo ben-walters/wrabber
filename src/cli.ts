@@ -32,7 +32,7 @@ const main = async () => {
                 '[WRABBER] - Error fetching the URL:',
                 error.message
               );
-              process.exit(1); // Exit with error code
+              return;
             }
           }
         }
@@ -41,7 +41,7 @@ const main = async () => {
         });
       } catch (error) {
         console.error('[WRABBER] - Error running generator:', error.message);
-        process.exit(1); // Exit with error code
+        return;
       }
       break;
     case 'postinstall':
@@ -54,14 +54,13 @@ const main = async () => {
           console.log(
             `See the docs at: https://www.npmjs.com/package/wrabber, or run "npx wrabber help"`
           );
-          process.exit(1); // Exit with error code
+          return;
         }
         execSync(`node ${generatorPath} --file=${filePath}`, {
           stdio: 'inherit',
         });
       } catch (error) {
         console.error('[WRABBER] - Error during postinstall:', error.message);
-        process.exit(1); // Exit with error code
       }
       break;
     case 'help':
