@@ -27,6 +27,7 @@ for (const arg of args) {
 
 const OUTPUT_FILE_TS = path.resolve(__dirname, '../generated-types.ts');
 const OUTPUT_FILE_D_TS = path.resolve(__dirname, '../generated-types.d.ts');
+
 export function validateVersion(version: string): void {
   const SUPPORTED_VERSIONS = [1];
   if (!SUPPORTED_VERSIONS.includes(parseInt(version, 10))) {
@@ -61,11 +62,10 @@ export function generateTypes(schema: EventsSchema): string {
       return field.values.map((v) => `"${v}"`).join(' | ');
     } else if (field.type === 'array' && field.items) {
       const itemType = resolveFieldType(field.items);
-
+      // Wrap enums (union types) in parentheses for correct array typing
       if (field.items.type === 'enum') {
         return `(${itemType})[]`;
       }
-
       return `${itemType}[]`;
     } else {
       return field.type;
@@ -89,16 +89,6 @@ export function generateTypes(schema: EventsSchema): string {
       lines.push('  }');
     }
     lines.push('}');
-    lines.push('');
-    lines.push('export interface EventDataMap {');
-    for (const [namespaceName, eventGroup] of Object.entries(events)) {
-      for (const eventName of Object.keys(eventGroup)) {
-        lines.push(
-          `  "${namespaceName}.${eventName}": EventTypes.${namespaceName}.${eventName};`
-        );
-      }
-    }
-    lines.push('}');
   } else {
     lines.push('export namespace EventTypes {');
     for (const [namespaceName, eventGroup] of Object.entries(events)) {
@@ -115,18 +105,42 @@ export function generateTypes(schema: EventsSchema): string {
       }
     }
     lines.push('}');
-    lines.push('');
-    lines.push('export interface EventDataMap {');
-    for (const [namespaceName, eventGroup] of Object.entries(events)) {
-      for (const eventName of Object.keys(eventGroup)) {
+  }
+
+  lines.push('');
+  lines.push('export interface EventDataMap {');
+  for (const [namespaceName, eventGroup] of Object.entries(events)) {
+    for (const eventName of Object.keys(eventGroup)) {
+      if (namespace) {
+        lines.push(
+          `  "${namespaceName}.${eventName}": EventTypes.${namespaceName}.${eventName};`
+        );
+      } else {
         const flatEventName = `${namespaceName}${eventName}`;
         lines.push(
           `  "${namespaceName}.${eventName}": EventTypes.${flatEventName};`
         );
       }
     }
-    lines.push('}');
   }
+  lines.push('}');
+  lines.push('');
+  lines.push('// --- RUNTIME VALUE for event names ---');
+  lines.push('export const Events = {'); // Changed from EventNames
+
+  for (const [namespaceName, eventGroup] of Object.entries(events)) {
+    lines.push(`  ${namespaceName}: {`);
+    for (const eventName of Object.keys(eventGroup)) {
+      const flatEventName = `${namespaceName}.${eventName}`;
+      lines.push(`    ${eventName}: "${flatEventName}",`);
+    }
+    lines.push(`  },`);
+  }
+
+  lines.push('} as const;');
+  lines.push('');
+  lines.push('// A union type of all event names');
+  lines.push('export type EventName = keyof EventDataMap;');
 
   return lines.join('\n');
 }
@@ -138,11 +152,18 @@ async function main() {
 
     validateVersion(schema.version);
 
-    const types = generateTypes(schema);
+    // Generate the full implementation content with types and values.
+    const implementationContent = generateTypes(schema);
 
-    fs.writeFileSync(OUTPUT_FILE_TS, types, 'utf8');
+    // Write the full implementation to the .ts file.
+    fs.writeFileSync(OUTPUT_FILE_TS, implementationContent, 'utf8');
 
-    fs.writeFileSync(OUTPUT_FILE_D_TS, types, 'utf8');
+    // Create the simple declaration content that re-exports from the .ts file.
+    // This correctly separates implementation from declaration.
+    const declarationContent = `export * from './generated-types';\n`;
+
+    // Write the declaration to the .d.ts file.
+    fs.writeFileSync(OUTPUT_FILE_D_TS, declarationContent, 'utf8');
 
     console.log(`[WRABBER] - Generated types succesfully.`);
   } catch (error) {

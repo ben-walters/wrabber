@@ -8,3 +8,5 @@ export namespace EventTypes {
 export interface EventDataMap {
   // Placeholder interface
 }
+
+export type Events = keyof EventDataMap;
