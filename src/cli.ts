@@ -38,7 +38,8 @@ const main = async () => {
             }
           }
         }
-        execSync(`node ${generatorPath} --file=${filePath}`, {
+        // Quote the file path to handle spaces
+        execSync(`node "${generatorPath}" --file="${filePath}"`, {
           stdio: 'inherit',
         });
       } catch (error) {
@@ -64,7 +65,7 @@ const main = async () => {
             `[WRABBER] - Schema file already exists at: ${filePath}. No changes made.`
           );
         }
-        execSync(`node ${generatorPath} --file=${filePath}`, {
+        execSync(`node "${generatorPath}" --file="${filePath}"`, {
           stdio: 'inherit',
         });
       } catch (error) {
