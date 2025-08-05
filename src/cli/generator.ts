@@ -2,7 +2,6 @@ import fs from 'fs';
 import yaml from 'js-yaml';
 import path from 'path';
 
-// ... (interfaces and validateVersion function remain the same) ...
 interface EventField {
   type: string;
   required: boolean;
@@ -20,38 +19,39 @@ interface EventsSchema {
 export function validateVersion(version: string): void {
   const SUPPORTED_VERSIONS = [1];
   if (!SUPPORTED_VERSIONS.includes(parseInt(version, 10))) {
-    throw new Error(
-      `Unsupported schema version: ${version}. Supported versions are ${SUPPORTED_VERSIONS.join(
-        ', '
-      )}.`
-    );
+    throw new Error(`Unsupported schema version: ${version}.`);
   }
 }
 
-// --- ARGUMENT AND PATH PARSING ---
 const args = process.argv.slice(2);
 let filePath = path.resolve(process.cwd(), '.wrabber/events.yaml');
 
 for (const arg of args) {
   if (arg.startsWith('--file=')) {
-    // The input file path is still resolved relative to the user's current directory
-    filePath = path.resolve(process.cwd(), arg.split('=')[1]);
+    const fileArg = arg.split('=')[1];
+    filePath = path.resolve(process.cwd(), fileArg.replace(/^"|"$/g, ''));
   }
 }
 
-// --- CORRECTED OUTPUT PATHS ---
-// Define output paths relative to this script's location inside the `dist` folder.
-// Assuming this script is in `dist/cli/`, `../` will correctly place the files in `dist/`.
 const OUTPUT_FILE_TS = path.resolve(__dirname, '../generated-types.ts');
 const OUTPUT_FILE_JS = path.resolve(__dirname, '../generated-types.js');
 const OUTPUT_FILE_D_TS = path.resolve(__dirname, '../generated-types.d.ts');
 
-// The generateTypes function is correct and remains unchanged.
+const VALID_TYPES = [
+  'string',
+  'number',
+  'boolean',
+  'date', // Allow "date" in the schema
+  'enum',
+  'array',
+  'object',
+  'string | null',
+];
+
 export function generateTypes(schema: EventsSchema): {
   ts: string;
   js: string;
 } {
-  // ... (your existing, correct generateTypes function) ...
   const { namespace, events } = schema;
   const lines: string[] = [];
   const jslines: string[] = [];
@@ -61,7 +61,13 @@ export function generateTypes(schema: EventsSchema): {
   lines.push('');
 
   function resolveFieldType(field: EventField): string {
-    if (field.type === 'object' && field.fields) {
+    if (!VALID_TYPES.includes(field.type)) {
+      throw new Error(`Invalid type "${field.type}" in schema.`);
+    }
+
+    if (field.type === 'date') {
+      return 'Date'; // Convert "date" to TypeScript's "Date"
+    } else if (field.type === 'object' && field.fields) {
       const nestedFields = Object.entries(field.fields)
         .map(([nestedFieldName, nestedField]) => {
           const nestedOptional = nestedField.required ? '' : '?';
@@ -138,8 +144,6 @@ export function generateTypes(schema: EventsSchema): {
   lines.push('}');
   lines.push('');
 
-  lines.push('// --- RUNTIME VALUE for event names ---');
-  jslines.push('// --- RUNTIME VALUE for event names ---');
   lines.push('export const Events = {');
   jslines.push('export const Events = {');
 
@@ -158,7 +162,6 @@ export function generateTypes(schema: EventsSchema): {
   lines.push('} as const;');
   jslines.push('}');
   lines.push('');
-  lines.push('// A union type of all event names');
   lines.push('export type EventName = keyof EventDataMap;');
 
   return { ts: lines.join('\n'), js: jslines.join('\n') };
@@ -189,12 +192,11 @@ async function main() {
     fs.writeFileSync(OUTPUT_FILE_TS, ts, 'utf8');
     fs.writeFileSync(OUTPUT_FILE_JS, js, 'utf8');
 
-    // The path in the re-export must be relative to the file's location.
     const declarationContent = `export * from './generated-types';\n`;
 
     fs.writeFileSync(OUTPUT_FILE_D_TS, declarationContent, 'utf8');
 
-    console.log(`[WRABBER] - Generated types succesfully.`);
+    console.log(`[WRABBER] - Generated types successfully.`);
   } catch (error) {
     console.error(`\n[WRABBER] - FATAL ERROR: ${error.message}\n`);
     process.exit(1);
