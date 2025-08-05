@@ -3,8 +3,8 @@ import yaml from 'js-yaml';
 import path from 'path';
 
 interface EventField {
-  type: string;
-  required: boolean;
+  type?: string; // Make type optional to handle empty definitions
+  required?: boolean;
   fields?: Record<string, EventField>;
   items?: EventField;
   values?: string[];
@@ -13,7 +13,10 @@ interface EventField {
 interface EventsSchema {
   version: string;
   namespace: boolean;
-  events: Record<string, Record<string, Record<string, EventField>>>;
+  events: Record<
+    string,
+    Record<string, Record<string, EventField> | EventField>
+  >;
 }
 
 export function validateVersion(version: string): void {
@@ -41,12 +44,48 @@ const VALID_TYPES = [
   'string',
   'number',
   'boolean',
-  'date', // Allow "date" in the schema
+  'date',
   'enum',
   'array',
   'object',
   'string | null',
+  'any', // Add support for "any" type
 ];
+
+function resolveFieldType(field: EventField, path: string): string {
+  if (!field.type) {
+    throw new Error(`Missing "type" at path: ${path}`);
+  }
+
+  if (!VALID_TYPES.includes(field.type)) {
+    throw new Error(`Invalid type "${field.type}" at path: ${path}`);
+  }
+
+  if (field.type === 'date') {
+    return 'Date';
+  } else if (field.type === 'object' && field.fields) {
+    const nestedFields = Object.entries(field.fields)
+      .map(([nestedFieldName, nestedField]) => {
+        const nestedOptional = nestedField.required ? '' : '?';
+        return `        ${nestedFieldName}${nestedOptional}: ${resolveFieldType(
+          nestedField,
+          `${path}.fields.${nestedFieldName}`
+        )};`;
+      })
+      .join('\n');
+    return `{\n${nestedFields}\n      }`;
+  } else if (field.type === 'enum' && field.values) {
+    return field.values.map((v) => `"${v}"`).join(' | ');
+  } else if (field.type === 'array' && field.items) {
+    const itemType = resolveFieldType(field.items, `${path}.items`);
+    if (field.items.type === 'enum') {
+      return `(${itemType})[]`;
+    }
+    return `${itemType}[]`;
+  } else {
+    return field.type;
+  }
+}
 
 export function generateTypes(schema: EventsSchema): {
   ts: string;
@@ -60,49 +99,36 @@ export function generateTypes(schema: EventsSchema): {
   lines.push(`// Schema version: ${schema.version}`);
   lines.push('');
 
-  function resolveFieldType(field: EventField): string {
-    if (!VALID_TYPES.includes(field.type)) {
-      throw new Error(`Invalid type "${field.type}" in schema.`);
-    }
-
-    if (field.type === 'date') {
-      return 'Date'; // Convert "date" to TypeScript's "Date"
-    } else if (field.type === 'object' && field.fields) {
-      const nestedFields = Object.entries(field.fields)
-        .map(([nestedFieldName, nestedField]) => {
-          const nestedOptional = nestedField.required ? '' : '?';
-          return `        ${nestedFieldName}${nestedOptional}: ${resolveFieldType(
-            nestedField
-          )};`;
-        })
-        .join('\n');
-      return `{\n${nestedFields}\n      }`;
-    } else if (field.type === 'enum' && field.values) {
-      return field.values.map((v) => `"${v}"`).join(' | ');
-    } else if (field.type === 'array' && field.items) {
-      const itemType = resolveFieldType(field.items);
-      if (field.items.type === 'enum') {
-        return `(${itemType})[]`;
-      }
-      return `${itemType}[]`;
-    } else {
-      return field.type;
-    }
-  }
-
   if (namespace) {
     lines.push('export namespace EventTypes {');
     for (const [namespaceName, eventGroup] of Object.entries(events)) {
       lines.push(`  export namespace ${namespaceName} {`);
-      for (const [eventName, fields] of Object.entries(eventGroup)) {
-        lines.push(`    export interface ${eventName} {`);
-        for (const [fieldName, field] of Object.entries(fields)) {
-          const optional = field.required ? '' : '?';
+      for (const [eventName, eventDefinition] of Object.entries(eventGroup)) {
+        if (typeof eventDefinition === 'object' && eventDefinition.type) {
+          // Scalar event (e.g., type: number, type: any)
+          const optional = eventDefinition.required ? '' : '?';
           lines.push(
-            `      ${fieldName}${optional}: ${resolveFieldType(field)};`
+            `    export type ${eventName} = ${resolveFieldType(
+              eventDefinition,
+              `events.${namespaceName}.${eventName}`
+            )}${optional};`
           );
+        } else {
+          // Object-based event
+          lines.push(`    export interface ${eventName} {`);
+          for (const [fieldName, field] of Object.entries(
+            eventDefinition as Record<string, EventField>
+          )) {
+            const optional = field.required ? '' : '?';
+            lines.push(
+              `      ${fieldName}${optional}: ${resolveFieldType(
+                field,
+                `events.${namespaceName}.${eventName}.${fieldName}`
+              )};`
+            );
+          }
+          lines.push('    }');
         }
-        lines.push('    }');
       }
       lines.push('  }');
     }
@@ -110,16 +136,33 @@ export function generateTypes(schema: EventsSchema): {
   } else {
     lines.push('export namespace EventTypes {');
     for (const [namespaceName, eventGroup] of Object.entries(events)) {
-      for (const [eventName, fields] of Object.entries(eventGroup)) {
+      for (const [eventName, eventDefinition] of Object.entries(eventGroup)) {
         const flatEventName = `${namespaceName}${eventName}`;
-        lines.push(`  export interface ${flatEventName} {`);
-        for (const [fieldName, field] of Object.entries(fields)) {
-          const optional = field.required ? '' : '?';
+        if (typeof eventDefinition === 'object' && eventDefinition.type) {
+          // Scalar event
+          const optional = eventDefinition.required ? '' : '?';
           lines.push(
-            `    ${fieldName}${optional}: ${resolveFieldType(field)};`
+            `  export type ${flatEventName} = ${resolveFieldType(
+              eventDefinition,
+              `events.${namespaceName}.${eventName}`
+            )}${optional};`
           );
+        } else {
+          // Object-based event
+          lines.push(`  export interface ${flatEventName} {`);
+          for (const [fieldName, field] of Object.entries(
+            eventDefinition as Record<string, EventField>
+          )) {
+            const optional = field.required ? '' : '?';
+            lines.push(
+              `    ${fieldName}${optional}: ${resolveFieldType(
+                field,
+                `events.${namespaceName}.${eventName}.${fieldName}`
+              )};`
+            );
+          }
+          lines.push('  }');
         }
-        lines.push('  }');
       }
     }
     lines.push('}');
