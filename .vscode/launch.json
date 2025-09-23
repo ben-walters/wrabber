@@ -11,7 +11,8 @@
       "skipFiles": ["<node_internals>/**"],
       "program": "${workspaceFolder}/dist/cli.js",
       "preLaunchTask": "tsc: build - tsconfig.json",
-      "args": ["generate", "--url=https://cdn.kolla.pet/events.yaml"],
+      // "args": ["generate", "--url=https://cdn.kolla.pet/events.yaml"],
+      "args": ["generate"],
       "outFiles": ["${workspaceFolder}/dist/**/*.js"]
     },
     {

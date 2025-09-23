@@ -13,7 +13,10 @@ interface EventField {
 interface EventsSchema {
   version: string;
   namespace: boolean;
-  events: Record<string, Record<string, Record<string, EventField> | EventField>>;
+  events: Record<
+    string,
+    Record<string, Record<string, EventField> | EventField>
+  >;
 }
 
 export function validateVersion(version: string): void {
@@ -102,7 +105,10 @@ export function generateTypes(schema: EventsSchema): {
       lines.push(`  export namespace ${namespaceName} {`);
       for (const [eventName, eventDefinition] of Object.entries(eventGroup)) {
         if (typeof eventDefinition === 'object' && eventDefinition.type) {
-          const optional = eventDefinition.type === 'any' ? '' : eventDefinition.required ? '' : '?';
+          const optional =
+            eventDefinition.type === 'any' || eventDefinition.required
+              ? ''
+              : '?';
           lines.push(
             `    export type ${eventName} = ${resolveFieldType(
               eventDefinition,
@@ -134,7 +140,10 @@ export function generateTypes(schema: EventsSchema): {
       for (const [eventName, eventDefinition] of Object.entries(eventGroup)) {
         const flatEventName = `${namespaceName}${eventName}`;
         if (typeof eventDefinition === 'object' && eventDefinition.type) {
-          const optional = eventDefinition.type === 'any' ? '' : eventDefinition.required ? '' : '?';
+          const optional =
+            eventDefinition.type === 'any' || eventDefinition.required
+              ? ''
+              : '?';
           lines.push(
             `  export type ${flatEventName} = ${resolveFieldType(
               eventDefinition,
@@ -206,7 +215,9 @@ export function generateTypes(schema: EventsSchema): {
 async function main() {
   try {
     if (!fs.existsSync(filePath)) {
-      throw new Error(`Schema file not found at the specified path: ${filePath}`);
+      throw new Error(
+        `Schema file not found at the specified path: ${filePath}`
+      );
     }
 
     const fileContent = fs.readFileSync(filePath, 'utf8');

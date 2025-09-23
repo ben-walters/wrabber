@@ -110,7 +110,7 @@ export class Wrabber {
   async init() {
     if (this.devMode) {
       logger.debug(
-        '[EventsEngine] Running in devMode. No real RabbitMQ connection.',
+        '[Wrabber] Running in devMode. No real RabbitMQ connection.',
         'init'
       );
       return;
@@ -194,7 +194,7 @@ export class Wrabber {
         this.isConnecting = false;
         if (this.debug) logger.debug('AMQP connected and topology ready');
       } catch (error) {
-        logger.error(error, 'Error initializing events engine:');
+        logger.error(error, 'Error initializing Wrabber:');
         this.isConnecting = false;
         logger.debug('init error: Retrying in 5 seconds...');
         setTimeout(() => this.init(), 5000);
