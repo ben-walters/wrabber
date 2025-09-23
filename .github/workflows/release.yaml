@@ -44,7 +44,7 @@ jobs:
         run: npm run build  --ignore-scripts
 
       - name: Make cli executable
-        run: chmod +x ./dist/cli.js
+        run: chmod +x ./dist/esm/cli.js
 
       - name: Publish to NPM
         if: steps.tag_version.outputs.new_tag

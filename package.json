@@ -25,7 +25,7 @@
     "rebuild": "rm -rf dist && npm run build && chmod +x dist/cli.js"
   },
   "bin": {
-    "wrabber": "dist/cli.js"
+    "wrabber": "dist/esm/cli.js"
   },
   "repository": {
     "type": "git",
