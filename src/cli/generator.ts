@@ -36,9 +36,21 @@ for (const arg of args) {
   }
 }
 
-const OUTPUT_FILE_TS = path.resolve(__dirname, '../generated-types.ts');
-const OUTPUT_FILE_JS = path.resolve(__dirname, '../generated-types.js');
-const OUTPUT_FILE_D_TS = path.resolve(__dirname, '../generated-types.d.ts');
+const OUTPUT_FILE_TS_ESM = path.resolve(
+  __dirname,
+  '../../esm/generated-types.ts'
+);
+const OUTPUT_FILE_TS_CJS = path.resolve(__dirname, '../generated-types.ts');
+const OUTPUT_FILE_JS_ESM = path.resolve(
+  __dirname,
+  '../../esm/generated-types.js'
+);
+const OUTPUT_FILE_JS_CJS = path.resolve(__dirname, '../generated-types.js');
+const OUTPUT_FILE_D_TS_ESM = path.resolve(
+  __dirname,
+  '../../esm/generated-types.d.ts'
+);
+const OUTPUT_FILE_D_TS_CJS = path.resolve(__dirname, '../generated-types.d.ts');
 
 const VALID_TYPES = [
   'string',
@@ -52,13 +64,13 @@ const VALID_TYPES = [
   'any',
 ];
 
-function resolveFieldType(field: EventField, path: string): string {
+function resolveFieldType(field: EventField, pathStr: string): string {
   if (!field.type) {
-    throw new Error(`Missing "type" at path: ${path}`);
+    throw new Error(`Missing "type" at path: ${pathStr}`);
   }
 
   if (!VALID_TYPES.includes(field.type)) {
-    throw new Error(`Invalid type "${field.type}" at path: ${path}`);
+    throw new Error(`Invalid type "${field.type}" at path: ${pathStr}`);
   }
 
   if (field.type === 'date') {
@@ -69,7 +81,7 @@ function resolveFieldType(field: EventField, path: string): string {
         const nestedOptional = nestedField.required ? '' : '?';
         return `        ${nestedFieldName}${nestedOptional}: ${resolveFieldType(
           nestedField,
-          `${path}.fields.${nestedFieldName}`
+          `${pathStr}.fields.${nestedFieldName}`
         )};`;
       })
       .join('\n');
@@ -77,7 +89,7 @@ function resolveFieldType(field: EventField, path: string): string {
   } else if (field.type === 'enum' && field.values) {
     return field.values.map((v) => `"${v}"`).join(' | ');
   } else if (field.type === 'array' && field.items) {
-    const itemType = resolveFieldType(field.items, `${path}.items`);
+    const itemType = resolveFieldType(field.items, `${pathStr}.items`);
     if (field.items.type === 'enum') {
       return `(${itemType})[]`;
     }
@@ -89,53 +101,58 @@ function resolveFieldType(field: EventField, path: string): string {
 
 export function generateTypes(schema: EventsSchema): {
   ts: string;
-  js: string;
+  jsEsm: string;
+  jsCjs: string;
 } {
   const { namespace, events } = schema;
-  const lines: string[] = [];
-  const jslines: string[] = [];
 
-  lines.push('// AUTO-GENERATED FILE. DO NOT EDIT.');
-  lines.push(`// Schema version: ${schema.version}`);
-  lines.push('');
+  const tsLines: string[] = [];
+  const jsEsmLines: string[] = [];
+  const jsCjsLines: string[] = [];
 
+  // Header for TS
+  tsLines.push('// AUTO-GENERATED FILE. DO NOT EDIT.');
+  tsLines.push(`// Schema version: ${schema.version}`);
+  tsLines.push('');
+
+  // Types namespace
   if (namespace) {
-    lines.push('export namespace EventTypes {');
+    tsLines.push('export namespace EventTypes {');
     for (const [namespaceName, eventGroup] of Object.entries(events)) {
-      lines.push(`  export namespace ${namespaceName} {`);
+      tsLines.push(`  export namespace ${namespaceName} {`);
       for (const [eventName, eventDefinition] of Object.entries(eventGroup)) {
         if (typeof eventDefinition === 'object' && eventDefinition.type) {
           const optional =
             eventDefinition.type === 'any' || eventDefinition.required
               ? ''
               : '?';
-          lines.push(
+          tsLines.push(
             `    export type ${eventName} = ${resolveFieldType(
               eventDefinition,
               `events.${namespaceName}.${eventName}`
             )}${optional};`
           );
         } else {
-          lines.push(`    export interface ${eventName} {`);
+          tsLines.push(`    export interface ${eventName} {`);
           for (const [fieldName, field] of Object.entries(
             eventDefinition as Record<string, EventField>
           )) {
             const optional = field.required ? '' : '?';
-            lines.push(
+            tsLines.push(
               `      ${fieldName}${optional}: ${resolveFieldType(
                 field,
                 `events.${namespaceName}.${eventName}.${fieldName}`
               )};`
             );
           }
-          lines.push('    }');
+          tsLines.push('    }');
         }
       }
-      lines.push('  }');
+      tsLines.push('  }');
     }
-    lines.push('}');
+    tsLines.push('}');
   } else {
-    lines.push('export namespace EventTypes {');
+    tsLines.push('export namespace EventTypes {');
     for (const [namespaceName, eventGroup] of Object.entries(events)) {
       for (const [eventName, eventDefinition] of Object.entries(eventGroup)) {
         const flatEventName = `${namespaceName}${eventName}`;
@@ -144,72 +161,86 @@ export function generateTypes(schema: EventsSchema): {
             eventDefinition.type === 'any' || eventDefinition.required
               ? ''
               : '?';
-          lines.push(
+          tsLines.push(
             `  export type ${flatEventName} = ${resolveFieldType(
               eventDefinition,
               `events.${namespaceName}.${eventName}`
             )}${optional};`
           );
         } else {
-          lines.push(`  export interface ${flatEventName} {`);
+          tsLines.push(`  export interface ${flatEventName} {`);
           for (const [fieldName, field] of Object.entries(
             eventDefinition as Record<string, EventField>
           )) {
             const optional = field.required ? '' : '?';
-            lines.push(
+            tsLines.push(
               `    ${fieldName}${optional}: ${resolveFieldType(
                 field,
                 `events.${namespaceName}.${eventName}.${fieldName}`
               )};`
             );
           }
-          lines.push('  }');
+          tsLines.push('  }');
         }
       }
     }
-    lines.push('}');
+    tsLines.push('}');
   }
 
-  lines.push('');
-  lines.push('export interface EventDataMap {');
+  // EventDataMap
+  tsLines.push('');
+  tsLines.push('export interface EventDataMap {');
   for (const [namespaceName, eventGroup] of Object.entries(events)) {
     for (const eventName of Object.keys(eventGroup)) {
       if (namespace) {
-        lines.push(
+        tsLines.push(
           `  "${namespaceName}.${eventName}": EventTypes.${namespaceName}.${eventName};`
         );
       } else {
         const flatEventName = `${namespaceName}${eventName}`;
-        lines.push(
+        tsLines.push(
           `  "${namespaceName}.${eventName}": EventTypes.${flatEventName};`
         );
       }
     }
   }
-  lines.push('}');
-  lines.push('');
+  tsLines.push('}');
+  tsLines.push('');
 
-  lines.push('export const Events = {');
-  jslines.push('export const Events = {');
+  // Runtime Events object
+  tsLines.push('export const Events = {');
+  jsEsmLines.push('export const Events = {');
+  jsCjsLines.push('const Events = {');
 
   for (const [namespaceName, eventGroup] of Object.entries(events)) {
-    jslines.push(`  ${namespaceName}: {`);
-    lines.push(`  ${namespaceName}: {`);
+    tsLines.push(`  ${namespaceName}: {`);
+    jsEsmLines.push(`  ${namespaceName}: {`);
+    jsCjsLines.push(`  ${namespaceName}: {`);
     for (const eventName of Object.keys(eventGroup)) {
       const flatEventName = `${namespaceName}.${eventName}`;
-      lines.push(`    ${eventName}: "${flatEventName}",`);
-      jslines.push(`    ${eventName}: "${flatEventName}",`);
+      tsLines.push(`    ${eventName}: "${flatEventName}",`);
+      jsEsmLines.push(`    ${eventName}: "${flatEventName}",`);
+      jsCjsLines.push(`    ${eventName}: "${flatEventName}",`);
     }
-    lines.push(`  },`);
-    jslines.push(`  },`);
+    tsLines.push('  },');
+    jsEsmLines.push('  },');
+    jsCjsLines.push('  },');
   }
 
-  lines.push('} as const;');
-  jslines.push('}');
-  lines.push('');
-  lines.push('export type EventName = keyof EventDataMap;');
+  tsLines.push('} as const;');
+  jsEsmLines.push('}');
+  jsCjsLines.push('}');
+  jsCjsLines.push('');
+  jsCjsLines.push('module.exports = { Events };');
 
-  return { ts: lines.join('\n'), js: jslines.join('\n') };
+  tsLines.push('');
+  tsLines.push('export type EventName = keyof EventDataMap;');
+
+  return {
+    ts: tsLines.join('\n'),
+    jsEsm: jsEsmLines.join('\n'),
+    jsCjs: jsCjsLines.join('\n'),
+  };
 }
 
 async function main() {
@@ -221,7 +252,6 @@ async function main() {
     }
 
     const fileContent = fs.readFileSync(filePath, 'utf8');
-
     const schema = yaml.load(fileContent) as EventsSchema;
 
     if (!schema || !schema.events || Object.keys(schema.events).length === 0) {
@@ -232,17 +262,23 @@ async function main() {
 
     validateVersion(schema.version);
 
-    const { ts, js } = generateTypes(schema);
+    const { ts, jsEsm, jsCjs } = generateTypes(schema);
 
-    fs.writeFileSync(OUTPUT_FILE_TS, ts, 'utf8');
-    fs.writeFileSync(OUTPUT_FILE_JS, js, 'utf8');
+    // Write TS to both esm/ and cjs/ (identical TS is fine)
+    fs.writeFileSync(OUTPUT_FILE_TS_ESM, ts, 'utf8');
+    fs.writeFileSync(OUTPUT_FILE_TS_CJS, ts, 'utf8');
 
+    // Write ESM and CJS JS variants
+    fs.writeFileSync(OUTPUT_FILE_JS_ESM, jsEsm, 'utf8');
+    fs.writeFileSync(OUTPUT_FILE_JS_CJS, jsCjs, 'utf8');
+
+    // Typings re-export
     const declarationContent = `export * from './generated-types';\n`;
-
-    fs.writeFileSync(OUTPUT_FILE_D_TS, declarationContent, 'utf8');
+    fs.writeFileSync(OUTPUT_FILE_D_TS_CJS, declarationContent, 'utf8');
+    fs.writeFileSync(OUTPUT_FILE_D_TS_ESM, declarationContent, 'utf8');
 
     console.log(`[WRABBER] - Generated types successfully.`);
-  } catch (error) {
+  } catch (error: any) {
     console.error(`\n[WRABBER] - FATAL ERROR: ${error.message}\n`);
     process.exit(1);
   }
