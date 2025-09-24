@@ -107,6 +107,70 @@ export class Wrabber {
     }
   }
 
+  private isPreconditionFailed(err: any): boolean {
+    return !!(
+      err &&
+      (err.code === 406 ||
+        String(err?.message || '').includes('PRECONDITION_FAILED'))
+    );
+  }
+
+  private isInequivalentArgs(err: any): boolean {
+    if (!this.isPreconditionFailed(err)) return false;
+    const msg = String(err?.message || '');
+    return msg.includes('inequivalent arg');
+  }
+
+  private buildQueueArgs(): Record<string, any> | undefined {
+    const args: Record<string, any> = {};
+    const dlxName = `${this.namespace}.dlx`;
+    if (this.dlq.enabled) {
+      args['x-dead-letter-exchange'] = dlxName;
+    }
+    if (this.messageTtlMs != null) {
+      args['x-message-ttl'] = this.messageTtlMs;
+    }
+    return Object.keys(args).length ? args : undefined;
+  }
+
+  private async assertOrRecreateQueue(queueName: string) {
+    const args = this.buildQueueArgs();
+    try {
+      await this.channel.assertQueue(queueName, {
+        durable: this.durable,
+        exclusive: false,
+        autoDelete: false,
+        arguments: args,
+      });
+      await this.channel.bindQueue(queueName, this.namespace, '');
+    } catch (e) {
+      if (this.isInequivalentArgs(e)) {
+        // Delete and recreate (messages will be lost)
+        try {
+          await this.channel.deleteQueue(queueName);
+          logger.warn(
+            { queue: queueName, args },
+            'Queue arguments mismatch detected. Deleted and recreating queue with the desired configuration. Messages in the previous queue were dropped.'
+          );
+        } catch (delErr) {
+          logger.warn(
+            { queue: queueName, err: delErr },
+            'Failed to delete queue during arg-mismatch recovery (may not exist). Proceeding to recreate.'
+          );
+        }
+        await this.channel.assertQueue(queueName, {
+          durable: this.durable,
+          exclusive: false,
+          autoDelete: false,
+          arguments: args,
+        });
+        await this.channel.bindQueue(queueName, this.namespace, '');
+      } else {
+        throw e;
+      }
+    }
+  }
+
   async init() {
     if (this.devMode) {
       logger.debug(
@@ -160,22 +224,7 @@ export class Wrabber {
           });
         }
 
-        const args: Record<string, any> = {};
-        if (this.dlq.enabled) {
-          args['x-dead-letter-exchange'] = dlxName;
-        }
-        if (this.messageTtlMs != null) {
-          args['x-message-ttl'] = this.messageTtlMs;
-        }
-
-        await this.channel.assertQueue(this.queueName, {
-          durable: this.durable,
-          exclusive: false,
-          autoDelete: false,
-          arguments: Object.keys(args).length ? args : undefined,
-        });
-
-        await this.channel.bindQueue(this.queueName, this.namespace, '');
+        await this.assertOrRecreateQueue(this.queueName);
 
         if (this.dlq.enabled) {
           const dlqName = `${this.namespace}.${this.serviceName}.dlq`;
@@ -252,19 +301,7 @@ export class Wrabber {
           });
         }
 
-        const args: Record<string, any> = {};
-        if (this.dlq.enabled) args['x-dead-letter-exchange'] = dlxName;
-        if (this.messageTtlMs != null)
-          args['x-message-ttl'] = this.messageTtlMs;
-
-        await this.channel.assertQueue(this.queueName, {
-          durable: this.durable,
-          exclusive: false,
-          autoDelete: false,
-          arguments: Object.keys(args).length ? args : undefined,
-        });
-
-        await this.channel.bindQueue(this.queueName, this.namespace, '');
+        await this.assertOrRecreateQueue(this.queueName);
 
         if (this.dlq.enabled) {
           const dlqName = `${this.namespace}.${this.serviceName}.dlq`;
