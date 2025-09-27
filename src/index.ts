@@ -25,7 +25,7 @@ interface EventsOpts {
   messageTtlMs?: number | null; // default null (no TTL)
 }
 
-export type EventData<T extends keyof EventDataMap> = EventDataMap[T];
+type EventData<T extends keyof EventDataMap> = EventDataMap[T];
 type EventHandler<T extends keyof EventDataMap> = (
   data: EventData<T>
 ) => void | Promise<void>;
@@ -468,7 +468,9 @@ export class Wrabber {
   }
 }
 
-export type EventName = keyof EventDataMap;
-export type Events = {
+type EventName = keyof EventDataMap;
+type Events = {
   [K in EventName]: { event: K; data: EventDataMap[K] };
 }[EventName];
+
+export { EventData, EventDataMap, EventName, Events };
