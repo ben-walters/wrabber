@@ -108,17 +108,8 @@ export class Wrabber {
   }
 
   private isPreconditionFailed(err: any): boolean {
-    return !!(
-      err &&
-      (err.code === 406 ||
-        String(err?.message || '').includes('PRECONDITION_FAILED'))
-    );
-  }
-
-  private isInequivalentArgs(err: any): boolean {
-    if (!this.isPreconditionFailed(err)) return false;
-    const msg = String(err?.message || '');
-    return msg.includes('inequivalent arg');
+    // This is the specific AMQP error code for a parameter mismatch.
+    return !!(err && err.code === 406);
   }
 
   private buildQueueArgs(): Record<string, any> | undefined {
@@ -133,70 +124,108 @@ export class Wrabber {
     return Object.keys(args).length ? args : undefined;
   }
 
+  /**
+   * *** MODIFIED METHOD ***
+   * This is the corrected implementation that handles the "Channel Closed" error.
+   */
   private async assertOrRecreateQueue(queueName: string) {
     const args = this.buildQueueArgs();
+    const queueOptions = {
+      durable: this.durable,
+      exclusive: false,
+      autoDelete: false,
+      arguments: args,
+    };
+
     try {
-      await this.channel.assertQueue(queueName, {
-        durable: this.durable,
-        exclusive: false,
-        autoDelete: false,
-        arguments: args,
-      });
+      await this.channel.assertQueue(queueName, queueOptions);
       await this.channel.bindQueue(queueName, this.namespace, '');
     } catch (e) {
-      if (this.isInequivalentArgs(e)) {
-        // Delete and recreate (messages will be lost)
+      if (this.isPreconditionFailed(e)) {
+        // The original channel is now closed and unusable.
+        logger.warn(
+          { queue: queueName, err: (e as Error).message },
+          'Queue configuration mismatch detected. The channel was closed by the server. Attempting to delete the old queue with a temporary channel.'
+        );
+
+        let recoveryChannel: amqp.Channel | undefined;
         try {
-          await this.channel.deleteQueue(queueName);
+          // Create a NEW, temporary channel just for this cleanup operation.
+          recoveryChannel = await this.connection.createChannel();
+          await recoveryChannel.deleteQueue(queueName);
           logger.warn(
-            { queue: queueName, args },
-            'Queue arguments mismatch detected. Deleted and recreating queue with the desired configuration. Messages in the previous queue were dropped.'
+            { queue: queueName },
+            'Successfully deleted the old queue. The connection will now be re-established.'
           );
         } catch (delErr) {
-          logger.warn(
+          // This might fail if another pod deleted it first, which is okay.
+          logger.error(
             { queue: queueName, err: delErr },
-            'Failed to delete queue during arg-mismatch recovery (may not exist). Proceeding to recreate.'
+            'Failed to delete queue during recovery. Manual intervention may be required.'
           );
+        } finally {
+          // Always try to close the temporary channel.
+          if (recoveryChannel) {
+            try {
+              await recoveryChannel.close();
+            } catch {
+              /* ignore close errors on the temp channel */
+            }
+          }
         }
-        await this.channel.assertQueue(queueName, {
-          durable: this.durable,
-          exclusive: false,
-          autoDelete: false,
-          arguments: args,
-        });
-        await this.channel.bindQueue(queueName, this.namespace, '');
+
+        // IMPORTANT: Re-throw the original error. This will cause the init()/reconnectLoop()
+        // to fail this attempt and schedule a proper reconnect. The *next* attempt
+        // will succeed because we have just deleted the problematic queue.
+        throw e;
       } else {
+        // It was some other error, let the main loop handle it.
         throw e;
       }
     }
   }
 
-  async init() {
+  /**
+   * *** MODIFIED METHOD ***
+   * Refactored to be a simple, non-async wrapper around the robust reconnectLoop.
+   * This avoids code duplication and a potential race condition on init failure.
+   */
+  init() {
     if (this.devMode) {
       logger.debug(
-        '[Wrabber] Running in devMode. No real RabbitMQ connection.',
-        'init'
+        '[Wrabber] Running in devMode. No real RabbitMQ connection.'
       );
       return;
     }
+    // Prevent multiple concurrent init calls
     if (this.isConnecting || this.connection) {
       return;
     }
-    this.isConnecting = true;
-    this.isClosing = false;
 
-    const connectOnce = async () => {
-      const url = this.withHeartbeat(this.url);
+    this.isClosing = false;
+    this.reconnectLoop(); // This runs in the background
+    this.installSignalHandlers();
+  }
+
+  private async reconnectLoop() {
+    if (this.isConnecting || this.isClosing || this.connection) return;
+    this.isConnecting = true;
+    let attempt = 0;
+
+    while (!this.connection && !this.isClosing) {
+      attempt++;
       try {
+        const url = this.withHeartbeat(this.url);
+        logger.debug({ attempt }, 'Connecting to RabbitMQ');
         this.connection = await amqp.connect(url, {
           clientProperties: { connection_name: this.connectionName },
         });
+
         this.connection.on('error', (err) => {
           logger.warn({ err }, 'AMQP connection error');
         });
         this.connection.on('close', () => {
           logger.warn('AMQP connection closed');
-          // trigger reconnect
           this.connection = undefined as any;
           this.channel = undefined as any;
           this.consumerTag = null;
@@ -213,6 +242,7 @@ export class Wrabber {
 
         await this.channel.prefetch(this.prefetch);
 
+        // Assert topology
         await this.channel.assertExchange(this.namespace, 'fanout', {
           durable: this.durable,
         });
@@ -224,6 +254,7 @@ export class Wrabber {
           });
         }
 
+        // This method now contains the full recovery logic
         await this.assertOrRecreateQueue(this.queueName);
 
         if (this.dlq.enabled) {
@@ -241,91 +272,25 @@ export class Wrabber {
         }
 
         this.isConnecting = false;
-        if (this.debug) logger.debug('AMQP connected and topology ready');
-      } catch (error) {
-        logger.error(error, 'Error initializing Wrabber:');
-        this.isConnecting = false;
-        logger.debug('init error: Retrying in 5 seconds...');
-        setTimeout(() => this.init(), 5000);
-      }
-    };
-
-    await connectOnce();
-    this.installSignalHandlers();
-  }
-
-  private async reconnectLoop() {
-    if (this.isConnecting || this.isClosing || this.connection) return;
-    this.isConnecting = true;
-    let attempt = 0;
-
-    while (!this.connection && !this.isClosing) {
-      attempt++;
-      try {
-        const url = this.withHeartbeat(this.url);
-        logger.debug({ attempt }, 'Reconnecting to RabbitMQ');
-        this.connection = await amqp.connect(url, {
-          clientProperties: { connection_name: this.connectionName },
-        });
-
-        this.connection.on('error', (err) => {
-          logger.warn({ err }, 'AMQP connection error (reconnect)');
-        });
-        this.connection.on('close', () => {
-          logger.warn('AMQP connection closed (reconnect)');
-          this.connection = undefined as any;
-          this.channel = undefined as any;
-          this.consumerTag = null;
-          if (!this.isClosing) this.reconnectLoop();
-        });
-
-        this.channel = await this.connection.createChannel();
-        this.channel.on('error', (err) => {
-          logger.warn({ err }, 'AMQP channel error (reconnect)');
-        });
-        this.channel.on('close', () => {
-          logger.warn('AMQP channel closed (reconnect)');
-        });
-
-        await this.channel.prefetch(this.prefetch);
-
-        // Re-assert topology
-        await this.channel.assertExchange(this.namespace, 'fanout', {
-          durable: this.durable,
-        });
-
-        const dlxName = `${this.namespace}.dlx`;
-        if (this.dlq.enabled) {
-          await this.channel.assertExchange(dlxName, 'fanout', {
-            durable: true,
-          });
-        }
-
-        await this.assertOrRecreateQueue(this.queueName);
-
-        if (this.dlq.enabled) {
-          const dlqName = `${this.namespace}.${this.serviceName}.dlq`;
-          await this.channel.assertQueue(dlqName, {
-            durable: true,
-            exclusive: false,
-            autoDelete: false,
-          });
-          await this.channel.bindQueue(dlqName, dlxName, '');
-        }
-
-        if (this.canListen) {
-          await this.listen();
-        }
-
-        this.isConnecting = false;
-        logger.debug('Reconnected and topology reasserted');
-        return;
+        logger.debug('Connected and topology asserted');
+        return; // Exit the while loop on success
       } catch (err) {
+        // The assertOrRecreateQueue will throw on mismatch, landing us here.
+        // This is the desired behavior for triggering a clean retry.
         const backoff =
           this.reconnectBackoffMs[
             Math.min(attempt - 1, this.reconnectBackoffMs.length - 1)
           ];
-        logger.warn({ err, backoff }, 'Reconnect failed; backing off');
+        logger.warn({ err, backoff }, 'Connection failed; backing off');
+
+        // Clean up any failed connection attempts
+        if (this.connection) {
+          try {
+            await this.connection.close();
+          } catch {}
+          this.connection = undefined as any;
+        }
+
         await new Promise((r) => setTimeout(r, backoff));
       }
     }
@@ -495,10 +460,15 @@ export class Wrabber {
       } catch {
         /* ignore */
       }
+      // In a real app, you might want to force exit after a timeout
+      // setTimeout(() => process.exit(1), 5000).unref();
     };
     process.once('SIGINT', onSignal);
     process.once('SIGTERM', onSignal);
   }
 }
 
-export { EventDataMap, EventName, Events } from './generated-types';
+export type EventName = keyof EventDataMap;
+export type Events = {
+  [K in EventName]: { event: K; data: EventDataMap[K] };
+}[EventName];
