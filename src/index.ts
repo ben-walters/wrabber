@@ -3,8 +3,13 @@ import amqp from 'amqplib';
 import { EventDataMap } from './generated-types';
 import { logger } from './helpers/logger';
 
+// --- Improved Interfaces ---
+
+// Added maxLength as a safety valve for the DLQ
 interface DlqConfig {
   enabled: boolean;
+  ttlDays?: number;
+  maxLength?: number;
 }
 
 interface EventsOpts {
@@ -13,82 +18,107 @@ interface EventsOpts {
   namespace: string;
   debug?: boolean;
   canListen?: boolean;
-  fanout?: boolean; // kept for backward compat; not used for durable queues
   devMode?: boolean;
 
-  heartbeatSec?: number; // default 30
-  prefetch?: number; // default 50
-  connectionName?: string; // deterministic default if not provided
-  reconnectBackoffMs?: number[]; // default sequence
-  durable?: boolean; // default true
-  dlq?: DlqConfig; // default { enabled: true }
-  messageTtlMs?: number | null; // default null (no TTL)
+  heartbeatSec?: number;
+  prefetch?: number;
+  connectionName?: string;
+  reconnectBackoffMs?: number[];
+  durable?: boolean;
+  dlq?: DlqConfig;
+  messageTtlMs?: number | null;
 }
 
-type EventData<T extends keyof EventDataMap> = EventDataMap[T];
+// A simple interface for type safety on AMQP errors
+interface AmqpError extends Error {
+  code: number;
+}
+
+export type EventData<T extends keyof EventDataMap> = EventDataMap[T];
 type EventHandler<T extends keyof EventDataMap> = (
   data: EventData<T>
 ) => void | Promise<void>;
 
 export class Wrabber {
+  // --- Class Properties ---
+
+  // Correctly typed as amqp.Connection
   private connection!: amqp.ChannelModel;
   private channel!: amqp.Channel;
 
-  private debug: boolean;
-  private url: string;
-  private queueName: string;
-  private namespace: string;
-  private serviceName: string;
+  // Options (now readonly for safety)
+  private readonly url: string;
+  private readonly serviceName: string;
+  private readonly namespace: string;
+  private readonly debug: boolean;
+  private readonly canListen: boolean;
+  private readonly devMode: boolean;
+  private readonly heartbeatSec: number;
+  private readonly prefetch: number;
+  private readonly durable: boolean;
+  private readonly dlq: DlqConfig;
+  private readonly messageTtlMs: number | null;
+  private readonly reconnectBackoffMs: number[];
+  private readonly connectionName: string;
+
+  // Derived names are now readonly properties
+  private readonly queueName: string;
+  private readonly dlxName: string;
+  private readonly dlqName: string;
+
+  // State
   private handlers: Map<string, (data: any) => void>;
-  private canListen: boolean;
-  private fanout: boolean;
-  private devMode: boolean;
-
-  private heartbeatSec: number;
-  private prefetch: number;
-  private durable: boolean;
-  private dlq: DlqConfig;
-  private messageTtlMs: number | null;
-  private reconnectBackoffMs: number[];
-  private connectionName: string;
-
   private isConnecting = false;
   private isClosing = false;
   private consumerTag: string | null = null;
 
+  /**
+   * Refactored constructor using destructuring for clarity.
+   */
   constructor(opts: EventsOpts) {
-    this.debug = opts?.debug || false;
-    this.serviceName = opts.serviceName;
+    const {
+      debug = false,
+      canListen = false,
+      devMode = false,
+      heartbeatSec = 30,
+      prefetch = 50,
+      durable = true,
+      dlq = { enabled: false, ttlDays: 7, maxLength: 1000 },
+      messageTtlMs = null,
+      reconnectBackoffMs = [500, 1000, 2000, 5000, 10000, 15000, 30000],
+    } = opts;
+
     this.url = opts.url;
-    this.handlers = new Map();
-    this.canListen = opts.canListen || false;
+    this.serviceName = opts.serviceName;
     this.namespace = opts.namespace;
-    this.fanout = opts.fanout || false; // preserved but we now always use durable named queue
-    this.devMode = opts.devMode || false;
 
-    // Defaults per requirements
-    this.heartbeatSec = opts.heartbeatSec ?? 30;
-    this.prefetch = opts.prefetch ?? 50;
-    this.durable = opts.durable ?? true;
-    this.dlq = opts.dlq ?? { enabled: true };
-    this.messageTtlMs =
-      typeof opts.messageTtlMs === 'number' ? opts.messageTtlMs : null;
-    this.reconnectBackoffMs = opts.reconnectBackoffMs ?? [
-      500, 1000, 2000, 5000, 10000, 15000, 30000,
-    ];
+    this.debug = debug;
+    this.canListen = canListen;
+    this.devMode = devMode;
+    this.heartbeatSec = heartbeatSec;
+    this.prefetch = prefetch;
+    this.durable = durable;
+    this.dlq = dlq;
+    this.messageTtlMs = typeof messageTtlMs === 'number' ? messageTtlMs : null;
+    this.reconnectBackoffMs = reconnectBackoffMs;
 
+    this.handlers = new Map();
     const pod = process.env.POD_NAME || 'pod';
     this.connectionName =
       opts.connectionName ??
       `${this.namespace}:${this.serviceName}:${pod}:${process.pid}`;
 
-    // Always durable per-service queue: ${namespace}.${serviceName}
+    // Initialize derived names
     this.queueName = `${this.namespace}.${this.serviceName}`;
+    this.dlxName = `${this.namespace}.dlx`;
+    this.dlqName = `${this.namespace}.${this.serviceName}.dlq`;
 
     if (this.debug) {
       logger.debug({ queue: this.queueName }, 'Queue name set to');
     }
   }
+
+  // --- Private Methods ---
 
   private withHeartbeat(u: string): string {
     try {
@@ -107,106 +137,118 @@ export class Wrabber {
     }
   }
 
-  private isPreconditionFailed(err: any): boolean {
-    // This is the specific AMQP error code for a parameter mismatch.
+  private isPreconditionFailed(err: any): err is AmqpError {
     return !!(err && err.code === 406);
   }
 
-  private buildQueueArgs(): Record<string, any> | undefined {
-    const args: Record<string, any> = {};
-    const dlxName = `${this.namespace}.dlx`;
-    if (this.dlq.enabled) {
-      args['x-dead-letter-exchange'] = dlxName;
-    }
-    if (this.messageTtlMs != null) {
-      args['x-message-ttl'] = this.messageTtlMs;
-    }
-    return Object.keys(args).length ? args : undefined;
-  }
-
   /**
-   * *** MODIFIED METHOD ***
-   * This is the corrected implementation that handles the "Channel Closed" error.
+   * Asserts the main service queue.
+   * Now uses high-level amqplib shortcuts instead of buildQueueArgs.
    */
-  private async assertOrRecreateQueue(queueName: string) {
-    const args = this.buildQueueArgs();
-    const queueOptions = {
+  private async assertOrRecreateQueue() {
+    const queueOptions: amqp.Options.AssertQueue = {
       durable: this.durable,
       exclusive: false,
       autoDelete: false,
-      arguments: args,
     };
 
+    if (this.dlq.enabled) {
+      queueOptions.deadLetterExchange = this.dlxName;
+    }
+    if (this.messageTtlMs != null) {
+      queueOptions.messageTtl = this.messageTtlMs;
+    }
+
     try {
-      await this.channel.assertQueue(queueName, queueOptions);
-      await this.channel.bindQueue(queueName, this.namespace, '');
+      await this.channel.assertQueue(this.queueName, queueOptions);
+      await this.channel.bindQueue(this.queueName, this.namespace, '');
     } catch (e) {
       if (this.isPreconditionFailed(e)) {
-        // The original channel is now closed and unusable.
         logger.warn(
-          { queue: queueName, err: (e as Error).message },
-          'Queue configuration mismatch detected. The channel was closed by the server. Attempting to delete the old queue with a temporary channel.'
+          { queue: this.queueName, err: e.message },
+          'Queue configuration mismatch. Attempting to delete and recreate.'
         );
-
         let recoveryChannel: amqp.Channel | undefined;
         try {
-          // Create a NEW, temporary channel just for this cleanup operation.
           recoveryChannel = await this.connection.createChannel();
-          await recoveryChannel.deleteQueue(queueName);
+          await recoveryChannel.deleteQueue(this.queueName);
           logger.warn(
-            { queue: queueName },
-            'Successfully deleted the old queue. The connection will now be re-established.'
+            { queue: this.queueName },
+            'Successfully deleted old queue. Reconnect will proceed.'
           );
         } catch (delErr) {
-          // This might fail if another pod deleted it first, which is okay.
           logger.error(
-            { queue: queueName, err: delErr },
-            'Failed to delete queue during recovery. Manual intervention may be required.'
+            { queue: this.queueName, err: delErr },
+            'Failed to delete queue during recovery.'
           );
         } finally {
-          // Always try to close the temporary channel.
           if (recoveryChannel) {
             try {
               await recoveryChannel.close();
             } catch {
-              /* ignore close errors on the temp channel */
+              /* ignore */
             }
           }
         }
-
-        // IMPORTANT: Re-throw the original error. This will cause the init()/reconnectLoop()
-        // to fail this attempt and schedule a proper reconnect. The *next* attempt
-        // will succeed because we have just deleted the problematic queue.
-        throw e;
+        throw e; // Re-throw to trigger reconnect loop
       } else {
-        // It was some other error, let the main loop handle it.
-        throw e;
+        throw e; // Throw other errors
       }
     }
   }
 
   /**
-   * *** MODIFIED METHOD ***
-   * Refactored to be a simple, non-async wrapper around the robust reconnectLoop.
-   * This avoids code duplication and a potential race condition on init failure.
+   * Encapsulates all exchange/queue/binding setup in one place.
    */
+  private async _setupTopology() {
+    await this.channel.prefetch(this.prefetch);
+
+    await this.channel.assertExchange(this.namespace, 'fanout', {
+      durable: this.durable,
+    });
+
+    if (this.dlq.enabled) {
+      await this.channel.assertExchange(this.dlxName, 'fanout', {
+        durable: true,
+      });
+
+      const dlqOptions: amqp.Options.AssertQueue = {
+        durable: true,
+        exclusive: false,
+        autoDelete: false,
+      };
+
+      if (typeof this.dlq.ttlDays === 'number' && this.dlq.ttlDays > 0) {
+        dlqOptions.messageTtl = this.dlq.ttlDays * 24 * 60 * 60 * 1000;
+      }
+      if (typeof this.dlq.maxLength === 'number' && this.dlq.maxLength > 0) {
+        dlqOptions.maxLength = this.dlq.maxLength;
+      }
+
+      await this.channel.assertQueue(this.dlqName, dlqOptions);
+      await this.channel.bindQueue(this.dlqName, this.dlxName, '');
+    }
+
+    await this.assertOrRecreateQueue();
+  }
+
   init() {
     if (this.devMode) {
-      logger.debug(
-        '[Wrabber] Running in devMode. No real RabbitMQ connection.'
-      );
+      logger.debug('[Wrabber] Running in devMode.');
       return;
     }
-    // Prevent multiple concurrent init calls
     if (this.isConnecting || this.connection) {
       return;
     }
-
     this.isClosing = false;
-    this.reconnectLoop(); // This runs in the background
+    this.reconnectLoop();
     this.installSignalHandlers();
   }
 
+  /**
+   * Main connection loop. Now focuses on connection/channel state
+   * and delegates topology setup.
+   */
   private async reconnectLoop() {
     if (this.isConnecting || this.isClosing || this.connection) return;
     this.isConnecting = true;
@@ -221,9 +263,9 @@ export class Wrabber {
           clientProperties: { connection_name: this.connectionName },
         });
 
-        this.connection.on('error', (err) => {
-          logger.warn({ err }, 'AMQP connection error');
-        });
+        this.connection.on('error', (err) =>
+          logger.warn({ err }, 'AMQP connection error')
+        );
         this.connection.on('close', () => {
           logger.warn('AMQP connection closed');
           this.connection = undefined as any;
@@ -234,38 +276,12 @@ export class Wrabber {
 
         this.channel = await this.connection.createChannel();
         this.channel.on('error', (err) => {
-          logger.warn({ err }, 'AMQP channel error');
+          if (this.isPreconditionFailed(err)) return; // Suppress expected error
+          logger.warn({ err }, 'An unexpected AMQP channel error occurred');
         });
-        this.channel.on('close', () => {
-          logger.warn('AMQP channel closed');
-        });
+        this.channel.on('close', () => logger.warn('AMQP channel closed'));
 
-        await this.channel.prefetch(this.prefetch);
-
-        // Assert topology
-        await this.channel.assertExchange(this.namespace, 'fanout', {
-          durable: this.durable,
-        });
-
-        const dlxName = `${this.namespace}.dlx`;
-        if (this.dlq.enabled) {
-          await this.channel.assertExchange(dlxName, 'fanout', {
-            durable: true,
-          });
-        }
-
-        // This method now contains the full recovery logic
-        await this.assertOrRecreateQueue(this.queueName);
-
-        if (this.dlq.enabled) {
-          const dlqName = `${this.namespace}.${this.serviceName}.dlq`;
-          await this.channel.assertQueue(dlqName, {
-            durable: true,
-            exclusive: false,
-            autoDelete: false,
-          });
-          await this.channel.bindQueue(dlqName, dlxName, '');
-        }
+        await this._setupTopology();
 
         if (this.canListen) {
           await this.listen();
@@ -273,17 +289,14 @@ export class Wrabber {
 
         this.isConnecting = false;
         logger.debug('Connected and topology asserted');
-        return; // Exit the while loop on success
+        return;
       } catch (err) {
-        // The assertOrRecreateQueue will throw on mismatch, landing us here.
-        // This is the desired behavior for triggering a clean retry.
         const backoff =
           this.reconnectBackoffMs[
             Math.min(attempt - 1, this.reconnectBackoffMs.length - 1)
           ];
         logger.warn({ err, backoff }, 'Connection failed; backing off');
 
-        // Clean up any failed connection attempts
         if (this.connection) {
           try {
             await this.connection.close();
@@ -294,9 +307,10 @@ export class Wrabber {
         await new Promise((r) => setTimeout(r, backoff));
       }
     }
-
     this.isConnecting = false;
   }
+
+  // --- Public API Methods ---
 
   async emit<T extends keyof EventDataMap>(event: T, data: EventDataMap[T]) {
     if (this.devMode) {
@@ -312,17 +326,10 @@ export class Wrabber {
     }
 
     const payload = Buffer.from(JSON.stringify({ event, data }), 'utf8');
-    const ok = this.channel.publish(this.namespace, '', payload, {
+    this.channel.publish(this.namespace, '', payload, {
       persistent: true,
       contentType: 'application/json',
     });
-    if (!ok) {
-      await new Promise<void>((resolve) => this.channel.once('drain', resolve));
-    }
-
-    if (this.debug) {
-      logger.debug({ event, size: payload.length }, 'Event emitted');
-    }
   }
 
   async listen() {
@@ -351,7 +358,7 @@ export class Wrabber {
       async (msg) => {
         if (!msg) return;
 
-        let parsed: any;
+        let parsed: { event?: string; data?: unknown };
         try {
           parsed = JSON.parse(msg.content.toString());
         } catch (e) {
@@ -360,15 +367,21 @@ export class Wrabber {
           return;
         }
 
-        const event = parsed?.event;
-        const data = parsed?.data;
+        const { event, data } = parsed;
+
+        // Log if the message is a retry, which can indicate consumer crashes
+        if (msg.fields.redelivered) {
+          logger.warn(
+            { event },
+            'Processing a redelivered message. This may indicate a previous processing failure or crash.'
+          );
+        }
 
         if (this.debug) {
           logger.debug({ event }, `Event received`);
         }
 
         const handler = event ? this.handlers.get(event) : undefined;
-
         if (handler) {
           try {
             await handler(data);
@@ -378,13 +391,8 @@ export class Wrabber {
             this.channel.nack(msg, false, false);
           }
         } else {
-          if (this.dlq.enabled) {
-            logger.warn({ event }, 'No handler; nacking to DLQ');
-            this.channel.nack(msg, false, false);
-          } else {
-            logger.warn({ event }, 'No handler; DLQ disabled; acking');
-            this.channel.ack(msg);
-          }
+          logger.warn({ event }, 'No handler for event; nacking to DLQ');
+          this.channel.nack(msg, false, false);
         }
       },
       { noAck: false }
@@ -439,7 +447,7 @@ export class Wrabber {
   }
 
   setDebug(debug: boolean) {
-    this.debug = debug;
+    (this as any).debug = debug;
   }
 
   on<T extends keyof EventDataMap>(events: T | T[], handler: EventHandler<T>) {
@@ -455,13 +463,7 @@ export class Wrabber {
   private installSignalHandlers() {
     const onSignal = async (sig: NodeJS.Signals) => {
       logger.debug({ sig }, 'Signal received; closing AMQP');
-      try {
-        await this.close();
-      } catch {
-        /* ignore */
-      }
-      // In a real app, you might want to force exit after a timeout
-      // setTimeout(() => process.exit(1), 5000).unref();
+      await this.close();
     };
     process.once('SIGINT', onSignal);
     process.once('SIGTERM', onSignal);
