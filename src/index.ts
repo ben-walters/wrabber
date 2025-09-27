@@ -468,9 +468,4 @@ export class Wrabber {
   }
 }
 
-type EventName = keyof EventDataMap;
-type Events = {
-  [K in EventName]: { event: K; data: EventDataMap[K] };
-}[EventName];
-
-export { EventData, EventDataMap, EventName, Events };
+export { EventDataMap, EventName, Events } from './generated-types';
