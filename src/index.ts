@@ -5,7 +5,7 @@ import { logger } from './helpers/logger';
 
 interface DlqConfig {
   enabled: boolean;
-  ttlDays?: number;
+  ttlMins?: number;
   maxLength?: number;
 }
 
@@ -23,7 +23,7 @@ interface EventsOpts {
   reconnectBackoffMs?: number[];
   durable?: boolean;
   dlq?: DlqConfig;
-  messageTtlDays?: number | null;
+  messageTtlMins?: number | null;
 }
 
 interface AmqpError extends Error {
@@ -49,7 +49,7 @@ export class Wrabber {
   private readonly prefetch: number;
   private readonly durable: boolean;
   private readonly dlq: DlqConfig;
-  private readonly messageTtlDays: number | null;
+  private readonly messageTtlMins: number | null;
   private readonly reconnectBackoffMs: number[];
   private readonly connectionName: string;
 
@@ -71,7 +71,7 @@ export class Wrabber {
       prefetch = 50,
       durable = true,
       dlq = { enabled: false, ttlDays: 7, maxLength: 1000 },
-      messageTtlDays = null,
+      messageTtlMins = null,
       reconnectBackoffMs = [500, 1000, 2000, 5000, 10000, 15000, 30000],
     } = opts;
 
@@ -86,8 +86,8 @@ export class Wrabber {
     this.prefetch = prefetch;
     this.durable = durable;
     this.dlq = dlq;
-    this.messageTtlDays =
-      typeof messageTtlDays === 'number' ? messageTtlDays : null;
+    this.messageTtlMins =
+      typeof messageTtlMins === 'number' ? messageTtlMins : null;
     this.reconnectBackoffMs = reconnectBackoffMs;
 
     this.handlers = new Map();
@@ -137,8 +137,8 @@ export class Wrabber {
     if (this.dlq.enabled) {
       queueOptions.deadLetterExchange = this.dlxName;
     }
-    if (this.messageTtlDays != null) {
-      queueOptions.messageTtl = this.messageTtlDays * 24 * 60 * 60 * 1000;
+    if (this.messageTtlMins != null) {
+      queueOptions.messageTtl = this.messageTtlMins * 60 * 1000;
     }
 
     try {
@@ -197,8 +197,8 @@ export class Wrabber {
         autoDelete: false,
       };
 
-      if (typeof this.dlq.ttlDays === 'number' && this.dlq.ttlDays > 0) {
-        dlqOptions.messageTtl = this.dlq.ttlDays * 24 * 60 * 60 * 1000;
+      if (typeof this.dlq.ttlMins === 'number' && this.dlq.ttlMins > 0) {
+        dlqOptions.messageTtl = this.dlq.ttlMins * 60 * 1000;
       }
       if (typeof this.dlq.maxLength === 'number' && this.dlq.maxLength > 0) {
         dlqOptions.maxLength = this.dlq.maxLength;
