@@ -3,9 +3,6 @@ import amqp from 'amqplib';
 import { EventDataMap } from './generated-types';
 import { logger } from './helpers/logger';
 
-// --- Improved Interfaces ---
-
-// Added maxLength as a safety valve for the DLQ
 interface DlqConfig {
   enabled: boolean;
   ttlDays?: number;
@@ -26,10 +23,9 @@ interface EventsOpts {
   reconnectBackoffMs?: number[];
   durable?: boolean;
   dlq?: DlqConfig;
-  messageTtlMs?: number | null;
+  messageTtlDays?: number | null;
 }
 
-// A simple interface for type safety on AMQP errors
 interface AmqpError extends Error {
   code: number;
 }
@@ -40,13 +36,9 @@ type EventHandler<T extends keyof EventDataMap> = (
 ) => void | Promise<void>;
 
 export class Wrabber {
-  // --- Class Properties ---
-
-  // Correctly typed as amqp.Connection
   private connection!: amqp.ChannelModel;
   private channel!: amqp.Channel;
 
-  // Options (now readonly for safety)
   private readonly url: string;
   private readonly serviceName: string;
   private readonly namespace: string;
@@ -57,24 +49,19 @@ export class Wrabber {
   private readonly prefetch: number;
   private readonly durable: boolean;
   private readonly dlq: DlqConfig;
-  private readonly messageTtlMs: number | null;
+  private readonly messageTtlDays: number | null;
   private readonly reconnectBackoffMs: number[];
   private readonly connectionName: string;
 
-  // Derived names are now readonly properties
   private readonly queueName: string;
   private readonly dlxName: string;
   private readonly dlqName: string;
 
-  // State
   private handlers: Map<string, (data: any) => void>;
   private isConnecting = false;
   private isClosing = false;
   private consumerTag: string | null = null;
 
-  /**
-   * Refactored constructor using destructuring for clarity.
-   */
   constructor(opts: EventsOpts) {
     const {
       debug = false,
@@ -84,7 +71,7 @@ export class Wrabber {
       prefetch = 50,
       durable = true,
       dlq = { enabled: false, ttlDays: 7, maxLength: 1000 },
-      messageTtlMs = null,
+      messageTtlDays = null,
       reconnectBackoffMs = [500, 1000, 2000, 5000, 10000, 15000, 30000],
     } = opts;
 
@@ -99,7 +86,8 @@ export class Wrabber {
     this.prefetch = prefetch;
     this.durable = durable;
     this.dlq = dlq;
-    this.messageTtlMs = typeof messageTtlMs === 'number' ? messageTtlMs : null;
+    this.messageTtlDays =
+      typeof messageTtlDays === 'number' ? messageTtlDays : null;
     this.reconnectBackoffMs = reconnectBackoffMs;
 
     this.handlers = new Map();
@@ -114,11 +102,9 @@ export class Wrabber {
     this.dlqName = `${this.namespace}.${this.serviceName}.dlq`;
 
     if (this.debug) {
-      logger.debug({ queue: this.queueName }, 'Queue name set to');
+      logger.debug({ queue: this.queueName }, '[Wrabber] Queue name set to');
     }
   }
-
-  // --- Private Methods ---
 
   private withHeartbeat(u: string): string {
     try {
@@ -141,10 +127,6 @@ export class Wrabber {
     return !!(err && err.code === 406);
   }
 
-  /**
-   * Asserts the main service queue.
-   * Now uses high-level amqplib shortcuts instead of buildQueueArgs.
-   */
   private async assertOrRecreateQueue() {
     const queueOptions: amqp.Options.AssertQueue = {
       durable: this.durable,
@@ -155,8 +137,8 @@ export class Wrabber {
     if (this.dlq.enabled) {
       queueOptions.deadLetterExchange = this.dlxName;
     }
-    if (this.messageTtlMs != null) {
-      queueOptions.messageTtl = this.messageTtlMs;
+    if (this.messageTtlDays != null) {
+      queueOptions.messageTtl = this.messageTtlDays * 24 * 60 * 60 * 1000;
     }
 
     try {
@@ -166,7 +148,7 @@ export class Wrabber {
       if (this.isPreconditionFailed(e)) {
         logger.warn(
           { queue: this.queueName, err: e.message },
-          'Queue configuration mismatch. Attempting to delete and recreate.'
+          '[Wrabber] Queue configuration mismatch. Attempting to delete and recreate.'
         );
         let recoveryChannel: amqp.Channel | undefined;
         try {
@@ -174,12 +156,12 @@ export class Wrabber {
           await recoveryChannel.deleteQueue(this.queueName);
           logger.warn(
             { queue: this.queueName },
-            'Successfully deleted old queue. Reconnect will proceed.'
+            '[Wrabber] Successfully deleted old queue. Reconnect will proceed.'
           );
         } catch (delErr) {
           logger.error(
             { queue: this.queueName, err: delErr },
-            'Failed to delete queue during recovery.'
+            '[Wrabber] Failed to delete queue during recovery.'
           );
         } finally {
           if (recoveryChannel) {
@@ -197,9 +179,6 @@ export class Wrabber {
     }
   }
 
-  /**
-   * Encapsulates all exchange/queue/binding setup in one place.
-   */
   private async _setupTopology() {
     await this.channel.prefetch(this.prefetch);
 
@@ -246,8 +225,7 @@ export class Wrabber {
   }
 
   /**
-   * Main connection loop. Now focuses on connection/channel state
-   * and delegates topology setup.
+   * Main connection loop.
    */
   private async reconnectLoop() {
     if (this.isConnecting || this.isClosing || this.connection) return;
@@ -258,16 +236,16 @@ export class Wrabber {
       attempt++;
       try {
         const url = this.withHeartbeat(this.url);
-        logger.debug({ attempt }, 'Connecting to RabbitMQ');
+        logger.debug({ attempt }, '[Wrabber] Connecting to RabbitMQ');
         this.connection = await amqp.connect(url, {
           clientProperties: { connection_name: this.connectionName },
         });
 
         this.connection.on('error', (err) =>
-          logger.warn({ err }, 'AMQP connection error')
+          logger.warn({ err }, '[Wrabber] AMQP connection error')
         );
         this.connection.on('close', () => {
-          logger.warn('AMQP connection closed');
+          logger.warn('[Wrabber] MQP connection closed');
           this.connection = undefined as any;
           this.channel = undefined as any;
           this.consumerTag = null;
@@ -277,9 +255,14 @@ export class Wrabber {
         this.channel = await this.connection.createChannel();
         this.channel.on('error', (err) => {
           if (this.isPreconditionFailed(err)) return; // Suppress expected error
-          logger.warn({ err }, 'An unexpected AMQP channel error occurred');
+          logger.warn(
+            { err },
+            '[Wrabber] An unexpected AMQP channel error occurred'
+          );
         });
-        this.channel.on('close', () => logger.warn('AMQP channel closed'));
+        this.channel.on('close', () =>
+          logger.warn('[Wrabber] AMQP channel closed')
+        );
 
         await this._setupTopology();
 
@@ -288,14 +271,17 @@ export class Wrabber {
         }
 
         this.isConnecting = false;
-        logger.debug('Connected and topology asserted');
+        logger.debug('[Wrabber] Connected and topology asserted');
         return;
       } catch (err) {
         const backoff =
           this.reconnectBackoffMs[
             Math.min(attempt - 1, this.reconnectBackoffMs.length - 1)
           ];
-        logger.warn({ err, backoff }, 'Connection failed; backing off');
+        logger.warn(
+          { err, backoff },
+          '[Wrabber] Connection failed; backing off'
+        );
 
         if (this.connection) {
           try {
@@ -310,18 +296,16 @@ export class Wrabber {
     this.isConnecting = false;
   }
 
-  // --- Public API Methods ---
-
   async emit<T extends keyof EventDataMap>(event: T, data: EventDataMap[T]) {
     if (this.devMode) {
       if (this.debug) {
-        logger.debug({ event, data }, '[DevMode] Would emit event');
+        logger.debug({ event, data }, '[Wrabber] [DevMode] Would emit event');
       }
       return;
     }
 
     if (!this.channel) {
-      logger.warn('Events channel not initialized; dropping emit');
+      logger.warn('[Wrabber] Events channel not initialized; dropping emit');
       return;
     }
 
@@ -335,12 +319,12 @@ export class Wrabber {
   async listen() {
     if (this.devMode) {
       if (this.debug) {
-        logger.debug('[DevMode] Skipping listening for events.');
+        logger.debug('[Wrabber] [DevMode] Skipping listening for events.');
       }
       return;
     }
     if (!this.channel) {
-      logger.warn('Events channel not initialized');
+      logger.warn('[Wrabber] Events channel not initialized');
       return;
     }
 
@@ -362,23 +346,22 @@ export class Wrabber {
         try {
           parsed = JSON.parse(msg.content.toString());
         } catch (e) {
-          logger.warn({ e }, 'Invalid JSON message; nack to DLQ');
+          logger.warn({ e }, '[Wrabber] Invalid JSON message; nack to DLQ');
           this.channel.nack(msg, false, false);
           return;
         }
 
         const { event, data } = parsed;
 
-        // Log if the message is a retry, which can indicate consumer crashes
         if (msg.fields.redelivered) {
           logger.warn(
             { event },
-            'Processing a redelivered message. This may indicate a previous processing failure or crash.'
+            '[Wrabber] Processing a redelivered message. This may indicate a previous processing failure or crash.'
           );
         }
 
         if (this.debug) {
-          logger.debug({ event }, `Event received`);
+          logger.debug({ event }, '[Wrabber] Event received');
         }
 
         const handler = event ? this.handlers.get(event) : undefined;
@@ -387,12 +370,14 @@ export class Wrabber {
             await handler(data);
             this.channel.ack(msg);
           } catch (error) {
-            logger.error(error, `Error handling event ${event}:`);
+            logger.error(error, `[Wrabber] Error handling event ${event}:`);
             this.channel.nack(msg, false, false);
           }
         } else {
-          logger.warn({ event }, 'No handler for event; nacking to DLQ');
-          this.channel.nack(msg, false, false);
+          logger.warn(
+            { event },
+            '[Wrabber] No handler for event; leaving unacked in queue'
+          );
         }
       },
       { noAck: false }
@@ -401,7 +386,7 @@ export class Wrabber {
     this.consumerTag = res.consumerTag;
     logger.debug(
       { queue: this.queueName, prefetch: this.prefetch },
-      'Worker listening on queue'
+      '[Wrabber] Worker listening on queue'
     );
   }
 
@@ -410,7 +395,10 @@ export class Wrabber {
 
     if (this.devMode) {
       if (this.debug) {
-        logger.debug('[DevMode] Close called — nothing to clean up.', 'close');
+        logger.debug(
+          '[Wrabber] [DevMode] Close called — nothing to clean up.',
+          'close'
+        );
       }
       return;
     }
@@ -428,7 +416,7 @@ export class Wrabber {
         await this.channel.close();
       }
     } catch (e) {
-      logger.warn({ e }, 'Error closing channel');
+      logger.warn({ e }, '[Wrabber] Error closing channel');
     }
 
     try {
@@ -436,11 +424,14 @@ export class Wrabber {
         await this.connection.close();
       }
     } catch (e) {
-      logger.warn({ e }, 'Error closing connection');
+      logger.warn({ e }, '[Wrabber] Error closing connection');
     }
 
     if (this.debug) {
-      logger.debug(this.queueName, 'Closed connection to RabbitMQ queue');
+      logger.debug(
+        this.queueName,
+        '[Wrabber] Closed connection to RabbitMQ queue'
+      );
     }
 
     this.isConnecting = false;
@@ -455,14 +446,14 @@ export class Wrabber {
     for (const e of eventList) {
       this.handlers.set(e as string, handler as (data: any) => void);
       if (this.debug) {
-        logger.debug(e, 'Handler registered for event');
+        logger.debug(e, '[Wrabber] Handler registered for event');
       }
     }
   }
 
   private installSignalHandlers() {
     const onSignal = async (sig: NodeJS.Signals) => {
-      logger.debug({ sig }, 'Signal received; closing AMQP');
+      logger.debug({ sig }, '[Wrabber] Signal received; closing AMQP');
       await this.close();
     };
     process.once('SIGINT', onSignal);
