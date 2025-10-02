@@ -308,7 +308,9 @@ export class Wrabber {
       logger.warn('[Wrabber] Events channel not initialized; dropping emit');
       return;
     }
-
+    if (this.debug) {
+      logger.debug({ event, data }, '[Wrabber] Emitting event');
+    }
     const payload = Buffer.from(JSON.stringify({ event, data }), 'utf8');
     this.channel.publish(this.namespace, '', payload, {
       persistent: true,
