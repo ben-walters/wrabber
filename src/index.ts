@@ -24,6 +24,7 @@ interface EventsOpts {
   durable?: boolean;
   dlq?: DlqConfig;
   messageTtlMins?: number | null;
+  unhandledEventAction?: 'ack' | 'nack';
 }
 
 interface AmqpError extends Error {
@@ -52,6 +53,7 @@ export class Wrabber {
   private readonly messageTtlMins: number | null;
   private readonly reconnectBackoffMs: number[];
   private readonly connectionName: string;
+  private unhandledEventAction: 'ack' | 'nack' = 'ack';
 
   private readonly queueName: string;
   private readonly dlxName: string;
@@ -68,11 +70,12 @@ export class Wrabber {
       canListen = false,
       devMode = false,
       heartbeatSec = 30,
-      prefetch = 50,
+      prefetch = 10,
       durable = true,
       dlq = { enabled: false, ttlDays: 7, maxLength: 1000 },
       messageTtlMins = null,
       reconnectBackoffMs = [500, 1000, 2000, 5000, 10000, 15000, 30000],
+      unhandledEventAction = 'ack',
     } = opts;
 
     this.url = opts.url;
@@ -100,6 +103,7 @@ export class Wrabber {
     this.queueName = `${this.namespace}.${this.serviceName}`;
     this.dlxName = `${this.namespace}.dlx`;
     this.dlqName = `${this.namespace}.${this.serviceName}.dlq`;
+    this.unhandledEventAction = unhandledEventAction;
 
     if (this.debug) {
       logger.debug({ queue: this.queueName }, '[Wrabber] Queue name set to');
@@ -376,10 +380,12 @@ export class Wrabber {
             this.channel.nack(msg, false, false);
           }
         } else {
-          logger.warn(
-            { event },
-            '[Wrabber] No handler for event; leaving unacked in queue'
-          );
+          logger.warn({ event }, '[Wrabber] No handler for event');
+          if (this.unhandledEventAction === 'ack') {
+            this.channel.ack(msg);
+          } else {
+            this.channel.nack(msg, false, false);
+          }
         }
       },
       { noAck: false }
