@@ -375,6 +375,9 @@ export class Wrabber {
           try {
             await handler(data);
             this.channel.ack(msg);
+            if (this.debug) {
+              logger.debug(`[Wrabber] Successfully handled event ${event}:`);
+            }
           } catch (error) {
             logger.error(error, `[Wrabber] Error handling event ${event}:`);
             this.channel.nack(msg, false, false);
