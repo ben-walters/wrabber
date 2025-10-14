@@ -473,3 +473,4 @@ export class Wrabber {
 }
 
 export { EventDataMap, EventName, Events } from './generated-types';
+export default Wrabber;
