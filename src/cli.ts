@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { execSync } from 'child_process';
-import { existsSync, writeFileSync } from 'fs';
+import { existsSync, readFileSync, writeFileSync } from 'fs';
 import path from 'path';
 
 import { baseFile } from './helpers/base';
@@ -12,32 +12,59 @@ const command = args[0];
 const generatorPath = path.resolve(__dirname, './cli/generator.js');
 
 let filePath = path.resolve(process.cwd(), '.wrabber/events.yaml');
+let configFilePath = path.resolve(process.cwd(), '.wrabber/config.json');
+
+const handleRemote = async (url: string): Promise<string> => {
+  const data = await fetch(url);
+  if (!data.ok) {
+    throw new Error(`Failed to fetch URL: ${data.statusText}`);
+  }
+  const text = await data.text();
+  filePath = `${__dirname}/temp-events.yaml`;
+  writeFileSync(filePath, text, 'utf-8');
+  return filePath;
+};
+
 const main = async () => {
   switch (command) {
     case 'generate':
       try {
-        for (const arg of args) {
-          if (arg.startsWith('--file=')) {
-            filePath = path.resolve(process.cwd(), arg.split('=')[1]);
+        if (existsSync(configFilePath)) {
+          try {
+            const data = readFileSync(configFilePath, 'utf-8');
+            const configContent = JSON.parse(data);
+            if (configContent.file) {
+              filePath = path.resolve(process.cwd(), configContent.file);
+            }
+            if (configContent.url) {
+              filePath = await handleRemote(configContent.url);
+            }
+          } catch (error) {
+            console.error(
+              '[WRABBER] - Error reading config file:',
+              error.message
+            );
+            return;
           }
-          if (arg.startsWith('--url=')) {
-            try {
-              const data = await fetch(arg.split('=')[1]);
-              if (!data.ok) {
-                throw new Error(`Failed to fetch URL: ${data.statusText}`);
+        } else {
+          for (const arg of args) {
+            if (arg.startsWith('--file=')) {
+              filePath = path.resolve(process.cwd(), arg.split('=')[1]);
+            }
+            if (arg.startsWith('--url=')) {
+              try {
+                filePath = await handleRemote(arg.split('=')[1]);
+              } catch (error) {
+                console.error(
+                  '[WRABBER] - Error fetching the URL:',
+                  error.message
+                );
+                return;
               }
-              const text = await data.text();
-              filePath = `${__dirname}/temp-events.yaml`;
-              writeFileSync(filePath, text, 'utf-8');
-            } catch (error) {
-              console.error(
-                '[WRABBER] - Error fetching the URL:',
-                error.message
-              );
-              return;
             }
           }
         }
+
         // Quote the file path to handle spaces
         execSync(`node "${generatorPath}" --file="${filePath}"`, {
           stdio: 'inherit',
