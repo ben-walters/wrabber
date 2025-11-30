@@ -1,6 +1,6 @@
 {
   "name": "wrabber",
-  "version": "0.4.8",
+  "version": "0.4.9",
   "description": "A simple typesafe wrapper for RabbitMQ that simplies the config and management of RabbitMQ.",
   "main": "dist/cjs/index.js",
   "module": "dist/esm/index.js",
