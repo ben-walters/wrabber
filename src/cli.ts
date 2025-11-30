@@ -33,6 +33,7 @@ const parseArgs = () => {
 };
 
 const handleRemote = async (url: string): Promise<string> => {
+  console.log(`[WRABBER] - Fetching schema from URL: ${url}`);
   const response = await fetch(url);
   if (!response.ok) {
     throw new Error(`Failed to fetch URL: ${response.statusText}`);
@@ -46,7 +47,7 @@ const handleRemote = async (url: string): Promise<string> => {
   return tempFilePath;
 };
 
-const runGenerator = (filePath: string) => {
+const runGenerator = (filePath: string, url?: string) => {
   if (!existsSync(filePath)) {
     console.error(`[WRABBER] - Schema file not found at: ${filePath}`);
     console.error(
@@ -56,7 +57,7 @@ const runGenerator = (filePath: string) => {
   }
 
   try {
-    console.log(`[WRABBER] - Generating types from: ${filePath}`);
+    console.log(`[WRABBER] - Generating types from: ${url || filePath}`);
     execSync(`node "${generatorPath}" --file="${filePath}"`, {
       stdio: 'inherit',
     });
@@ -67,6 +68,7 @@ const runGenerator = (filePath: string) => {
 };
 
 const main = async () => {
+  let url: string | undefined;
   switch (COMMAND) {
     case 'generate': {
       let filePath: string | undefined;
@@ -75,8 +77,9 @@ const main = async () => {
       if (cliOptions.file) {
         filePath = cliOptions.file;
       } else if (cliOptions.url) {
+        filePath = await handleRemote(cliOptions.url);
         try {
-          filePath = await handleRemote(cliOptions.url);
+          url = cliOptions.url;
         } catch (error) {
           console.error('[WRABBER] - Error fetching the URL:', error.message);
           return;
@@ -92,6 +95,7 @@ const main = async () => {
             filePath = path.resolve(process.cwd(), config.file);
           } else if (config.url) {
             filePath = await handleRemote(config.url);
+            url = config.url;
           }
         } catch (error) {
           console.error(
@@ -104,7 +108,7 @@ const main = async () => {
 
       filePath = filePath || defaultEventsFilePath;
 
-      runGenerator(filePath);
+      runGenerator(filePath, url);
       break;
     }
 
