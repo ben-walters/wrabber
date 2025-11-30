@@ -222,8 +222,36 @@ npx wrabber generate --file=/path/to/local/file.yaml
 You can specify a remote file which will be downloaded by passing `--url=https://cdn.example.com/my-file.yaml` on the command line.
 
 ```
-npx wrabber generate --file=/path/to/local/file.yaml
+npx wrabber generate --url=/path/to/local/file.yaml
 ```
+
+---
+
+## Using a Configuration File
+
+As an alternative to command-line flags, you can define your schema source in a configuration file. This is useful for sharing project-level settings with your team.
+
+Wrabber will automatically look for a `.wrabber/config.json` file in your project's root directory.
+
+### Example `.wrabber/config.json`
+
+To point to a local schema file:
+
+```json
+{
+  "file": "./shared/events.yaml"
+}
+```
+
+To point to a remote schema file:
+
+```json
+{
+  "url": "https://example.com/schemas/events.yaml"
+}
+```
+
+**Note:** Command-line arguments like `--file` or `--url` will always take precedence over
 
 ---
 
@@ -248,7 +276,7 @@ Each event is defined with its payload fields. Fields can be of the following ty
 - **`object`**: A nested object with its own fields.
 - **`array`**: An array of a specific type.
 
-#### Example Event Definition
+Example Event Definition
 
 ```yaml
 Auth:
