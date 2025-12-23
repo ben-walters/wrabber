@@ -226,6 +226,7 @@ export class Wrabber {
     this.isClosing = false;
     this.reconnectLoop();
     this.installSignalHandlers();
+    logger.debug('[Wrabber] Initialized connection to RabbitMQ.');
   }
 
   /**
@@ -237,6 +238,7 @@ export class Wrabber {
     let attempt = 0;
 
     while (!this.connection && !this.isClosing) {
+      logger.info('[Wrabber] Attempting to connect to RabbitMQ...');
       attempt++;
       try {
         const url = this.withHeartbeat(this.url);
