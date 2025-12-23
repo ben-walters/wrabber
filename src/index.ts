@@ -64,6 +64,9 @@ export class Wrabber {
   private isClosing = false;
   private consumerTag: string | null = null;
 
+  private readyPromise!: Promise<void>;
+  private resolveReady!: () => void;
+
   constructor(opts: EventsOpts) {
     const {
       debug = false,
@@ -105,9 +108,22 @@ export class Wrabber {
     this.dlqName = `${this.namespace}.${this.serviceName}.dlq`;
     this.unhandledEventAction = unhandledEventAction;
 
+    // Initialize the ready promise when the instance is created
+    this.resetReadyState();
+
     if (this.debug) {
       logger.debug({ queue: this.queueName }, '[Wrabber] Queue name set to');
     }
+  }
+
+  /**
+   * Creates a new, unresolved promise for the connection state.
+   * This acts as a gate for operations like emit().
+   */
+  private resetReadyState() {
+    this.readyPromise = new Promise((resolve) => {
+      this.resolveReady = resolve;
+    });
   }
 
   private withHeartbeat(u: string): string {
@@ -215,18 +231,22 @@ export class Wrabber {
     await this.assertOrRecreateQueue();
   }
 
-  init() {
+  async init(): Promise<void> {
     if (this.devMode) {
       logger.debug('[Wrabber] Running in devMode.');
       return;
     }
     if (this.isConnecting || this.connection) {
-      return;
+      // If connection is already happening or done, just wait for it to be ready
+      return this.readyPromise;
     }
     this.isClosing = false;
-    this.reconnectLoop();
+    this.reconnectLoop(); // Start the connection loop in the background
     this.installSignalHandlers();
-    logger.debug('[Wrabber] Initialized connection to RabbitMQ.');
+    logger.debug('[Wrabber] Initialization started, awaiting connection...');
+
+    // Return the promise that will resolve when the connection is established
+    return this.readyPromise;
   }
 
   /**
@@ -251,10 +271,12 @@ export class Wrabber {
           logger.warn({ err }, '[Wrabber] AMQP connection error')
         );
         this.connection.on('close', () => {
-          logger.warn('[Wrabber] MQP connection closed');
+          logger.warn('[Wrabber] AMQP connection closed');
           this.connection = undefined as any;
           this.channel = undefined as any;
           this.consumerTag = null;
+          // Reset the ready state for the next connection attempt
+          this.resetReadyState();
           if (!this.isClosing) this.reconnectLoop();
         });
 
@@ -271,10 +293,6 @@ export class Wrabber {
           logger.warn('[Wrabber] AMQP channel closed')
         );
 
-        this.channel.on('connect', () =>
-          logger.debug('[Wrabber] AMQP channel connected')
-        );
-
         await this._setupTopology();
 
         if (this.canListen) {
@@ -283,7 +301,11 @@ export class Wrabber {
 
         this.isConnecting = false;
         logger.debug('[Wrabber] Connected and topology asserted');
-        return;
+
+        // Resolve the promise, signaling that the Wrabber is ready!
+        this.resolveReady();
+
+        return; // Exit the loop on successful connection
       } catch (err) {
         const backoff =
           this.reconnectBackoffMs[
@@ -315,23 +337,16 @@ export class Wrabber {
       return;
     }
 
+    // Wait for the connection to be ready before proceeding.
+    // This handles both initial connection and reconnections gracefully.
+    await this.readyPromise;
+
+    // This check is now mostly for type-safety, as readyPromise ensures it exists.
     if (!this.channel) {
-      logger.warn('[Wrabber] Events channel not initialized; dropping emit');
-      let attempts = 0;
-      while (!this.channel && attempts < 5) {
-        attempts++;
-        logger.debug(
-          { attempt: attempts },
-          '[Wrabber] Waiting for channel to initialize before emitting'
-        );
-        await new Promise((r) => setTimeout(r, 1000));
-      }
-      if (!this.channel) {
-        logger.error(
-          '[Wrabber] Events channel still not initialized; dropping emit'
-        );
-        return;
-      }
+      logger.error(
+        '[Wrabber] Channel is unexpectedly not available after ready signal. Dropping emit.'
+      );
+      return;
     }
 
     if (this.debug) {
