@@ -264,8 +264,13 @@ export class Wrabber {
             '[Wrabber] An unexpected AMQP channel error occurred'
           );
         });
+
         this.channel.on('close', () =>
           logger.warn('[Wrabber] AMQP channel closed')
+        );
+
+        this.channel.on('connect', () =>
+          logger.debug('[Wrabber] AMQP channel connected')
         );
 
         await this._setupTopology();
@@ -310,8 +315,23 @@ export class Wrabber {
 
     if (!this.channel) {
       logger.warn('[Wrabber] Events channel not initialized; dropping emit');
-      return;
+      let attempts = 0;
+      while (!this.channel && attempts < 5) {
+        attempts++;
+        logger.debug(
+          { attempt: attempts },
+          '[Wrabber] Waiting for channel to initialize before emitting'
+        );
+        await new Promise((r) => setTimeout(r, 1000));
+      }
+      if (!this.channel) {
+        logger.error(
+          '[Wrabber] Events channel still not initialized; dropping emit'
+        );
+        return;
+      }
     }
+
     if (this.debug) {
       logger.debug({ event, data }, '[Wrabber] Emitting event');
     }
