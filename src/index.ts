@@ -40,6 +40,8 @@ export class Wrabber {
   private connection!: amqp.ChannelModel;
   private channel!: amqp.Channel;
 
+  private initialised = false;
+
   private readonly url: string;
   private readonly serviceName: string;
   private readonly namespace: string;
@@ -244,6 +246,7 @@ export class Wrabber {
     this.reconnectLoop(); // Start the connection loop in the background
     this.installSignalHandlers();
     logger.debug('[Wrabber] Initialization started, awaiting connection...');
+    this.initialised = true;
 
     // Return the promise that will resolve when the connection is established
     return this.readyPromise;
@@ -334,6 +337,11 @@ export class Wrabber {
       if (this.debug) {
         logger.debug({ event, data }, '[Wrabber] [DevMode] Would emit event');
       }
+      return;
+    }
+
+    if (!this.initialised) {
+      logger.error('[Wrabber] Emit called before init(); dropping emit.');
       return;
     }
 
